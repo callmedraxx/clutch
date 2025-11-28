@@ -16,6 +16,7 @@ import {
   EventsStatus,
   Recurrence,
 } from '../services/polymarket/polymarket.types';
+import { injectedUrlsService } from '../services/polymarket/injected-urls.service';
 
 const router = Router();
 
@@ -695,6 +696,289 @@ router.get(
         return;
       }
 
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/injected-urls:
+ *   get:
+ *     summary: Get all injected URLs
+ *     description: Returns all dynamically injected URLs that are being polled for trending events
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: List of injected URLs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     urls:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           url:
+ *                             type: string
+ *                           path:
+ *                             type: string
+ *                           params:
+ *                             type: object
+ *                           createdAt:
+ *                             type: string
+ *                     count:
+ *                       type: number
+ */
+router.get(
+  '/injected-urls',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const urls = injectedUrlsService.getAllUrls();
+      const count = injectedUrlsService.getCount();
+
+      logger.info({
+        message: 'Injected URLs list requested',
+        count,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          urls,
+          count,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error listing injected URLs',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/injected-urls:
+ *   post:
+ *     summary: Add a new injected URL
+ *     description: Adds a new URL to be polled and merged with trending events. The URL should be a full Polymarket API URL (e.g., https://gamma-api.polymarket.com/events?slug=cfb-miss-mspst-2025-11-28)
+ *     tags: [Polymarket]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - url
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 example: https://gamma-api.polymarket.com/events?slug=cfb-miss-mspst-2025-11-28
+ *     responses:
+ *       200:
+ *         description: URL added successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     injectedUrl:
+ *                       type: object
+ *       400:
+ *         description: Validation error
+ */
+router.post(
+  '/injected-urls',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { url } = req.body;
+
+      if (!url || typeof url !== 'string') {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'URL is required and must be a string'
+        );
+      }
+
+      // Validate URL format
+      try {
+        new URL(url);
+      } catch {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Invalid URL format'
+        );
+      }
+
+      logger.info({
+        message: 'Adding injected URL',
+        url,
+      });
+
+      const injectedUrl = injectedUrlsService.addUrl(url);
+
+      logger.info({
+        message: 'Injected URL added successfully',
+        id: injectedUrl.id,
+        url,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          injectedUrl,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error adding injected URL',
+        error: error instanceof Error ? error.message : String(error),
+        body: req.body,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/injected-urls/{identifier}:
+ *   delete:
+ *     summary: Remove an injected URL
+ *     description: Removes an injected URL by ID or URL string. The identifier can be either the URL ID or the full URL string.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: path
+ *         name: identifier
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL ID or full URL string
+ *     responses:
+ *       200:
+ *         description: URL removed successfully
+ *       404:
+ *         description: URL not found
+ */
+router.delete(
+  '/injected-urls/:identifier',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { identifier } = req.params;
+
+      if (!identifier) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Identifier is required'
+        );
+      }
+
+      logger.info({
+        message: 'Removing injected URL',
+        identifier,
+      });
+
+      const removed = injectedUrlsService.removeUrl(identifier);
+
+      if (!removed) {
+        throw new ValidationError(
+          ErrorCode.NOT_FOUND,
+          `URL not found: ${identifier}`
+        );
+      }
+
+      logger.info({
+        message: 'Injected URL removed successfully',
+        identifier,
+      });
+
+      res.json({
+        success: true,
+        message: 'URL removed successfully',
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error removing injected URL',
+        error: error instanceof Error ? error.message : String(error),
+        identifier: req.params.identifier,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/injected-urls:
+ *   delete:
+ *     summary: Clear all injected URLs
+ *     description: Removes all injected URLs at once
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: All URLs cleared successfully
+ */
+router.delete(
+  '/injected-urls',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      logger.info({
+        message: 'Clearing all injected URLs',
+      });
+
+      injectedUrlsService.clearAll();
+
+      logger.info({
+        message: 'All injected URLs cleared',
+      });
+
+      res.json({
+        success: true,
+        message: 'All injected URLs cleared successfully',
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error clearing injected URLs',
+        error: error instanceof Error ? error.message : String(error),
+      });
       next(error);
     }
   }

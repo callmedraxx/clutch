@@ -20,6 +20,7 @@ import {
   SearchSort,
   EventsStatus,
 } from './polymarket.types';
+import { injectedUrlsService } from './injected-urls.service';
 
 const CACHE_TTL = parseInt(process.env.POLYMARKET_CACHE_TTL || '30', 10);
 
@@ -129,9 +130,50 @@ function getEndpointConfig(
 
 /**
  * Generate cache key for events
+ * Includes all relevant query parameters to ensure cache uniqueness
  */
-function getCacheKey(category: Category, offset: number, limit: number): string {
-  return `polymarket:events:${category}:${offset}:${limit}`;
+export function getCacheKey(params: EventsQueryParams): string {
+  const category = params.category || 'trending';
+  const limit = params.limit || 20;
+  const offset = params.offset || 0;
+
+  // Create a normalized params object with only the parameters that affect results
+  // Sort keys to ensure consistent cache keys
+  const cacheParams: Record<string, string | number | boolean | undefined> = {
+    category,
+    limit,
+    offset,
+    order: params.order,
+    tag_slug: params.tag_slug,
+    tag_id: params.tag_id,
+    active: params.active,
+    archived: params.archived,
+    closed: params.closed,
+    ascending: params.ascending,
+    end_date_min: params.end_date_min,
+    events_status: params.events_status,
+    sort: params.sort,
+    recurrence: params.recurrence,
+  };
+
+  // Create a deterministic string representation
+  // Filter out undefined values and sort keys for consistency
+  const filteredParams: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(cacheParams)) {
+    if (value !== undefined) {
+      filteredParams[key] = value;
+    }
+  }
+
+  // Sort keys to ensure consistent ordering
+  const sortedKeys = Object.keys(filteredParams).sort();
+  const paramString = sortedKeys
+    .map((key) => `${key}:${filteredParams[key]}`)
+    .join('|');
+
+  // Use a hash-like approach: create a short identifier from the params
+  // For cache keys, we'll use the full string but limit length if needed
+  return `polymarket:events:${paramString}`;
 }
 
 /**
@@ -154,7 +196,12 @@ export class PolymarketService {
     });
 
     // Check cache first
-    const cacheKey = getCacheKey(category, offset, limit);
+    const cacheKey = getCacheKey(params);
+    logger.debug({
+      message: 'Cache key generated',
+      cacheKey,
+      params,
+    });
     try {
       const cached = await getCache(cacheKey);
       if (cached) {
@@ -163,6 +210,7 @@ export class PolymarketService {
           category,
           offset,
           limit,
+          cacheKey,
         });
         return JSON.parse(cached);
       }
@@ -221,6 +269,26 @@ export class PolymarketService {
       // Merge polling data if available
       if (pollingEvents.length > 0) {
         transformedEvents = mergePollingData(transformedEvents, pollingEvents);
+      }
+
+      // For trending category, also fetch and merge injected URLs
+      if (category === 'trending') {
+        try {
+          const injectedEvents = await this.fetchInjectedUrls();
+          if (injectedEvents.length > 0) {
+            transformedEvents = mergePollingData(transformedEvents, injectedEvents);
+            logger.info({
+              message: 'Merged injected URL events with trending',
+              injectedEventCount: injectedEvents.length,
+              totalEventCount: transformedEvents.length,
+            });
+          }
+        } catch (error) {
+          logger.warn({
+            message: 'Error fetching injected URLs, continuing with main data',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
       // Apply pagination
@@ -309,7 +377,13 @@ export class PolymarketService {
       
       for (const category of categories) {
         try {
-          const cacheKey = getCacheKey(category, 0, 50);
+          // Create a basic params object for cache lookup
+          const cacheParams: EventsQueryParams = {
+            category,
+            limit: 50,
+            offset: 0,
+          };
+          const cacheKey = getCacheKey(cacheParams);
           const cached = await getCache(cacheKey);
           if (cached) {
             const data: TransformedEventsResponse = JSON.parse(cached);
@@ -357,7 +431,10 @@ export class PolymarketService {
 
     try {
       // Clear all cache keys for this category
-      const pattern = `polymarket:events:${category}:*`;
+      // New format: polymarket:events:category:${category}|limit:...|offset:...|...
+      // Since keys are sorted alphabetically, category will be first
+      // Pattern matches: polymarket:events:category:${category}*
+      const pattern = `polymarket:events:category:${category}*`;
       const keys = await this.getCacheKeys(pattern);
       
       for (const key of keys) {
@@ -461,6 +538,77 @@ export class PolymarketService {
       archived: false,
       closed: false,
     };
+  }
+
+  /**
+   * Fetch events from all injected URLs
+   */
+  private async fetchInjectedUrls(): Promise<TransformedEvent[]> {
+    const injectedUrls = injectedUrlsService.getAllUrls();
+    
+    if (injectedUrls.length === 0) {
+      return [];
+    }
+
+    logger.info({
+      message: 'Fetching injected URLs',
+      count: injectedUrls.length,
+    });
+
+    const allEvents: TransformedEvent[] = [];
+
+    // Fetch from each injected URL
+    for (const injectedUrl of injectedUrls) {
+      try {
+        logger.info({
+          message: 'Fetching injected URL',
+          id: injectedUrl.id,
+          path: injectedUrl.path,
+          params: injectedUrl.params,
+        });
+
+        const response = await polymarketClient.get<any>(
+          injectedUrl.path,
+          injectedUrl.params
+        );
+
+        // Handle both wrapped response {data: [...]} and direct array [...]
+        let events: any[] = [];
+        if (Array.isArray(response)) {
+          events = response;
+        } else if (response?.data && Array.isArray(response.data)) {
+          events = response.data;
+        } else if (response?.data) {
+          // Single event wrapped in data
+          events = [response.data];
+        }
+
+        const transformedEvents = transformEvents(events);
+        allEvents.push(...transformedEvents);
+
+        logger.info({
+          message: 'Injected URL fetched successfully',
+          id: injectedUrl.id,
+          eventCount: transformedEvents.length,
+        });
+      } catch (error) {
+        logger.error({
+          message: 'Error fetching injected URL',
+          id: injectedUrl.id,
+          url: injectedUrl.url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue with other URLs even if one fails
+      }
+    }
+
+    logger.info({
+      message: 'Injected URLs fetch completed',
+      urlCount: injectedUrls.length,
+      totalEventCount: allEvents.length,
+    });
+
+    return allEvents;
   }
 
   /**

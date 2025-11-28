@@ -11,7 +11,10 @@ import {
   Category,
   PolymarketApiResponse,
   EndpointConfig,
+  EventsQueryParams,
 } from './polymarket.types';
+import { injectedUrlsService } from './injected-urls.service';
+import { getCacheKey } from './polymarket.service';
 
 const POLLING_INTERVALS: Record<Category, number> = {
   trending: parseInt(process.env.POLYMARKET_POLLING_INTERVAL_TRENDING || '30', 10),
@@ -126,13 +129,49 @@ export class PollingService {
       );
 
       // Transform data
-      const transformedEvents = transformEvents(response.data || []);
+      let transformedEvents = transformEvents(response.data || []);
 
-      // Update cache for different offsets
+      // For trending category, also poll injected URLs and merge
+      if (category === 'trending') {
+        const injectedEvents = await this.pollInjectedUrls();
+        if (injectedEvents.length > 0) {
+          transformedEvents = mergePollingData(transformedEvents, injectedEvents);
+        }
+      }
+
+      // Create base params from config to match the API call parameters
+      const baseParams: EventsQueryParams = {
+        category,
+        limit: config.params.limit as number,
+        offset: 0,
+        order: config.params.order as any,
+        active: config.params.active as boolean,
+        archived: config.params.archived as boolean,
+        closed: config.params.closed as boolean,
+        ascending: config.params.ascending as boolean,
+      };
+
+      // Add category-specific parameters
+      if (config.params.tag_slug) {
+        baseParams.tag_slug = config.params.tag_slug as string;
+      }
+      if (config.params.tag_id) {
+        baseParams.tag_id = config.params.tag_id as string;
+      }
+      if (config.params.end_date_min) {
+        baseParams.end_date_min = config.params.end_date_min as string;
+      }
+
+      // Update cache for different offsets with the default limit
       const offsets = [0, 20, 40];
+      const defaultLimit = 20;
       for (const offset of offsets) {
-        const limit = 20;
-        const cacheKey = `polymarket:events:${category}:${offset}:${limit}`;
+        const cacheParams: EventsQueryParams = {
+          ...baseParams,
+          limit: defaultLimit,
+          offset,
+        };
+        const cacheKey = getCacheKey(cacheParams);
         
         // Get existing cached data
         try {
@@ -143,8 +182,8 @@ export class PollingService {
             
             // Update pagination
             const totalResults = merged.length;
-            const paginatedEvents = merged.slice(offset, offset + limit);
-            const hasMore = offset + limit < totalResults;
+            const paginatedEvents = merged.slice(offset, offset + defaultLimit);
+            const hasMore = offset + defaultLimit < totalResults;
 
             const updatedData = {
               events: paginatedEvents,
@@ -152,7 +191,7 @@ export class PollingService {
                 hasMore,
                 totalResults,
                 offset,
-                limit,
+                limit: defaultLimit,
               },
             };
 
@@ -160,8 +199,8 @@ export class PollingService {
           } else {
             // If no cache, create new cache entry
             const totalResults = transformedEvents.length;
-            const paginatedEvents = transformedEvents.slice(offset, offset + limit);
-            const hasMore = offset + limit < totalResults;
+            const paginatedEvents = transformedEvents.slice(offset, offset + defaultLimit);
+            const hasMore = offset + defaultLimit < totalResults;
 
             const newData = {
               events: paginatedEvents,
@@ -169,7 +208,7 @@ export class PollingService {
                 hasMore,
                 totalResults,
                 offset,
-                limit,
+                limit: defaultLimit,
               },
             };
 
@@ -180,6 +219,7 @@ export class PollingService {
             message: 'Error updating cache during polling',
             category,
             offset,
+            cacheKey,
             error: error instanceof Error ? error.message : String(error),
           });
         }
@@ -198,6 +238,79 @@ export class PollingService {
       });
       // Continue polling even on error
     }
+  }
+
+  /**
+   * Poll all injected URLs and return transformed events
+   */
+  private async pollInjectedUrls(): Promise<any[]> {
+    const injectedUrls = injectedUrlsService.getAllUrls();
+    
+    if (injectedUrls.length === 0) {
+      return [];
+    }
+
+    logger.info({
+      message: 'Polling injected URLs',
+      count: injectedUrls.length,
+    });
+
+    const allEvents: any[] = [];
+
+    // Poll each injected URL
+    for (const injectedUrl of injectedUrls) {
+      try {
+        logger.info({
+          message: 'Polling injected URL',
+          id: injectedUrl.id,
+          path: injectedUrl.path,
+          params: injectedUrl.params,
+        });
+
+        // Use the full URL path and params
+        const response = await polymarketClient.get<any>(
+          injectedUrl.path,
+          injectedUrl.params
+        );
+
+        // Handle both wrapped response {data: [...]} and direct array [...]
+        let events: any[] = [];
+        if (Array.isArray(response)) {
+          events = response;
+        } else if (response?.data && Array.isArray(response.data)) {
+          events = response.data;
+        } else if (response?.data) {
+          // Single event wrapped in data
+          events = [response.data];
+        }
+
+        // Transform the events
+        const transformedEvents = transformEvents(events);
+        allEvents.push(...transformedEvents);
+
+        logger.info({
+          message: 'Injected URL polled successfully',
+          id: injectedUrl.id,
+          eventCount: transformedEvents.length,
+        });
+      } catch (error) {
+        logger.error({
+          message: 'Error polling injected URL',
+          id: injectedUrl.id,
+          url: injectedUrl.url,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue with other URLs even if one fails
+      }
+    }
+
+    logger.info({
+      message: 'Injected URLs polling completed',
+      urlCount: injectedUrls.length,
+      totalEventCount: allEvents.length,
+    });
+
+    return allEvents;
   }
 
   /**
@@ -240,11 +353,30 @@ export class PollingService {
       const response = await polymarketClient.get<PolymarketApiResponse>(path, params);
       const transformedEvents = transformEvents(response.data || []);
 
-      // Update cache for crypto category
+      // Create params object for cache key generation
+      // This is for crypto category with tag_id
+      const baseParams: EventsQueryParams = {
+        category: 'crypto',
+        limit: 20,
+        offset: 0,
+        active: params.active as boolean | undefined,
+        closed: params.closed as boolean | undefined,
+      };
+
+      // Add tag_id if present
+      if (params.tag_id) {
+        baseParams.tag_id = params.tag_id as string;
+      }
+
+      // Update cache for crypto category with different offsets
       const offsets = [0, 20, 40];
+      const defaultLimit = 20;
       for (const offset of offsets) {
-        const limit = 20;
-        const cacheKey = `polymarket:events:crypto:${offset}:${limit}`;
+        const cacheParams: EventsQueryParams = {
+          ...baseParams,
+          offset,
+        };
+        const cacheKey = getCacheKey(cacheParams);
         
         try {
           const cached = await getCache(cacheKey);
@@ -253,8 +385,8 @@ export class PollingService {
             const merged = mergePollingData(cachedData.events || [], transformedEvents);
             
             const totalResults = merged.length;
-            const paginatedEvents = merged.slice(offset, offset + limit);
-            const hasMore = offset + limit < totalResults;
+            const paginatedEvents = merged.slice(offset, offset + defaultLimit);
+            const hasMore = offset + defaultLimit < totalResults;
 
             const updatedData = {
               events: paginatedEvents,
@@ -262,7 +394,7 @@ export class PollingService {
                 hasMore,
                 totalResults,
                 offset,
-                limit,
+                limit: defaultLimit,
               },
             };
 
@@ -273,6 +405,7 @@ export class PollingService {
             message: 'Error updating cache during polling endpoint',
             path,
             offset,
+            cacheKey,
             error: error instanceof Error ? error.message : String(error),
           });
         }
