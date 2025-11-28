@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polymarket Card Test - Clutch Backend</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Polymarket Events - Card View Test</h1>
+            <div class="controls">
+                <div class="mode-toggle">
+                    <button id="browseModeBtn" class="mode-btn active">Browse</button>
+                    <button id="searchModeBtn" class="mode-btn">Search</button>
+                </div>
+                <div class="browse-controls" id="browseControls">
+                    <select id="categorySelect">
+                        <option value="trending">Trending</option>
+                        <option value="politics">Politics</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="finance">Finance</option>
+                        <option value="sports">Sports</option>
+                    </select>
+                    <button id="refreshBtn">Refresh</button>
+                </div>
+                <div class="search-controls" id="searchControls" style="display: none;">
+                    <input type="text" id="searchInput" placeholder="Search events..." class="search-input">
+                    <button id="searchBtn">Search</button>
+                </div>
+                <div class="loading" id="loading" style="display: none;">Loading...</div>
+            </div>
+        </header>
+
+        <div class="filters-section" id="filtersSection">
+            <div class="filters-grid">
+                <div class="filter-group">
+                    <label for="searchType">Type</label>
+                    <select id="searchType">
+                        <option value="events">Events</option>
+                        <option value="markets">Markets</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="eventsStatus">Status</label>
+                    <select id="eventsStatus">
+                        <option value="active">Active</option>
+                        <option value="resolved">Resolved</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="sortBy">Sort By</label>
+                    <select id="sortBy">
+                        <option value="volume_24hr">Volume 24hr</option>
+                        <option value="end_date">End Date</option>
+                        <option value="start_date">Start Date</option>
+                        <option value="volume">Volume</option>
+                        <option value="liquidity">Liquidity</option>
+                        <option value="closed_time">Closed Time</option>
+                        <option value="competitive">Competitive</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="sortDirection">Direction</label>
+                    <select id="sortDirection">
+                        <option value="false">Descending</option>
+                        <option value="true">Ascending</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="recurrenceFilter">Recurrence</label>
+                    <select id="recurrenceFilter">
+                        <option value="">None</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="tagFilter">Category</label>
+                    <select id="tagFilter">
+                        <option value="">All Categories</option>
+                        <option value="politics">Politics</option>
+                        <option value="crypto">Crypto</option>
+                        <option value="sports">Sports</option>
+                        <option value="finance">Finance</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats" id="stats" style="display: none;">
+            <span>Total Events: <strong id="eventCount">0</strong></span>
+            <span>Group Items: <strong id="groupItemCount">0</strong></span>
+            <span>Regular Markets: <strong id="regularCount">0</strong></span>
+        </div>
+
+        <div class="pagination" id="pagination" style="display: none;">
+            <button id="prevPageBtn" class="page-btn" disabled>Previous</button>
+            <span class="page-info">
+                Page <strong id="currentPage">1</strong> of <strong id="totalPages">1</strong>
+                (<strong id="totalResults">0</strong> results)
+            </span>
+            <button id="nextPageBtn" class="page-btn" disabled>Next</button>
+        </div>
+
+        <div class="cards-grid" id="cardsGrid">
+            <!-- Cards will be inserted here -->
+        </div>
+
+        <div class="error" id="error" style="display: none;"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

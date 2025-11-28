@@ -1,0 +1,121 @@
+{
+  "id": "79029",
+  "title": "James Comey\u2019s indictment dismissed before trial?",
+  "slug": "james-comeys-indictment-dismissed-before-trial",
+  "description": "Speculation about a possible dismissal of James Comey\u2019s indictment has grown after Judge William Fitzpatrick criticized prosecutors\u2019 handling of the case. The trial is currently scheduled to begin on January 5, 2026.\n\nThis market will resolve to \"Yes\" if James Comey\u2019s criminal indictment is wholly dismissed before the start of his trial. Otherwise, this market will resolve to \"No\".\n\nPartial dismissals that result in the indictment remaining active will not be sufficient to trigger a \"Yes\" resolution.\n\nIf prosecutors withdraw charges before trial, or Comey otherwise ceases to face the indictment without a formal dismissal, this market will resolve to \"No\". This market will only resolve to \"Yes\" if the indictment is wholly dismissed before the trial officially begins.\n\nIf neither a dismissal nor the start of the trial has occurred by March 31, 2026, this market will resolve to \"No\".\n\nThe primary resolution source for this market will be information from the U.S. federal court system; however, a consensus of credible reporting will also be used.",
+  "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+  "totalVolume": 75492.729591,
+  "volume24Hr": 13548.28,
+  "volume1Wk": 71430.09357400001,
+  "volume1Mo": 75492.72959100001,
+  "volume1Yr": 75492.72959100001,
+  "openInterest": 0,
+  "competitive": 0,
+  "active": true,
+  "closed": true,
+  "archived": false,
+  "restricted": true,
+  "featured": false,
+  "commentCount": 8,
+  "markets": [
+    {
+      "id": "676632",
+      "question": "James Comey\u2019s indictment dismissed before trial?",
+      "slug": "james-comeys-indictment-dismissed-before-trial",
+      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a",
+      "volume": 75492.729591,
+      "volume24Hr": 13548.28,
+      "volume1Wk": 71430.09357400001,
+      "volume1Mo": 75492.72959100001,
+      "volume1Yr": 75492.72959100001,
+      "active": true,
+      "closed": true,
+      "archived": false,
+      "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+      "description": "Speculation about a possible dismissal of James Comey\u2019s indictment has grown after Judge William Fitzpatrick criticized prosecutors\u2019 handling of the case. The trial is currently scheduled to begin on January 5, 2026.\n\nThis market will resolve to \"Yes\" if James Comey\u2019s criminal indictment is wholly dismissed before the start of his trial. Otherwise, this market will resolve to \"No\".\n\nPartial dismissals that result in the indictment remaining active will not be sufficient to trigger a \"Yes\" resolution.\n\nIf prosecutors withdraw charges before trial, or Comey otherwise ceases to face the indictment without a formal dismissal, this market will resolve to \"No\". This market will only resolve to \"Yes\" if the indictment is wholly dismissed before the trial officially begins.\n\nIf neither a dismissal nor the start of the trial has occurred by March 31, 2026, this market will resolve to \"No\".\n\nThe primary resolution source for this market will be information from the U.S. federal court system; however, a consensus of credible reporting will also be used.",
+      "outcomes": [
+        "Yes",
+        "No"
+      ],
+      "outcomePrices": [
+        "1",
+        "0"
+      ],
+      "structuredOutcomes": [],
+      "isGroupItem": false,
+      "groupItemTitle": "",
+      "groupItemThreshold": "0",
+      "clobTokenIds": [
+        "12428480488781750394688972363687149509574804742209408054721539328865632660060",
+        "79978265468935980129515868929420582778792604689725162593505878316791453001317"
+      ],
+      "endDate": "2026-01-05T00:00:00Z",
+      "startDate": "2025-11-11T19:00:09.01019Z",
+      "lastTradePrice": 1,
+      "bestBid": 0.998,
+      "bestAsk": 1,
+      "spread": 0.002,
+      "liquidity": 0,
+      "createdAt": "2025-11-11T17:14:34.334137Z",
+      "updatedAt": "2025-11-28T11:03:25.574113Z",
+      "closedTime": "2025-11-27 16:08:05+00",
+      "resolvedBy": "0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7",
+      "resolutionSource": "",
+      "umaResolutionStatus": "resolved",
+      "automaticallyResolved": true
+    }
+  ],
+  "tags": [
+    {
+      "id": "2",
+      "label": "Politics",
+      "slug": "politics"
+    },
+    {
+      "id": "596",
+      "label": "Culture",
+      "slug": "pop-culture"
+    },
+    {
+      "id": "126",
+      "label": "Trump",
+      "slug": "trump"
+    },
+    {
+      "id": "101392",
+      "label": "fbi",
+      "slug": "fbi"
+    }
+  ],
+  "startDate": "2025-11-11T19:07:23.596967Z",
+  "endDate": "2026-01-05T00:00:00Z",
+  "createdAt": "2025-11-11T17:14:33.60018Z",
+  "updatedAt": "2025-11-28T11:03:41.762231Z",
+  "hasGroupItems": false,
+  "groupedOutcomes": [
+    {
+      "label": "Yes",
+      "shortLabel": "YES",
+      "price": "100.00",
+      "probability": 100,
+      "volume": 75493,
+      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+      "clobTokenId": "12428480488781750394688972363687149509574804742209408054721539328865632660060",
+      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a"
+    },
+    {
+      "label": "No",
+      "shortLabel": "NO",
+      "price": "0.00",
+      "probability": 0,
+      "volume": 0,
+      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
+      "clobTokenId": "79978265468935980129515868929420582778792604689725162593505878316791453001317",
+      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a"
+    }
+  ],
+  "closedTime": "2025-11-27 16:08:05+00",
+  "isResolved": true
+}
