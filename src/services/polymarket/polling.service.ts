@@ -7,11 +7,9 @@ import { logger } from '../../config/logger';
 import { polymarketClient } from './polymarket.client';
 import { transformEvents, mergePollingData } from './polymarket.transformer';
 import { getCache, setCache } from '../../utils/cache';
-import { PolymarketError, ErrorCode } from '../../utils/errors';
 import {
   Category,
   PolymarketApiResponse,
-  TransformedEvent,
   EndpointConfig,
 } from './polymarket.types';
 
@@ -230,7 +228,7 @@ export class PollingService {
   private async pollPollingEndpoint(
     path: string,
     params: Record<string, any>,
-    key: string
+    _key: string
   ): Promise<void> {
     try {
       logger.info({

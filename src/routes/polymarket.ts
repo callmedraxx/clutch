@@ -136,7 +136,7 @@ function validateQueryParams(req: Request): EventsQueryParams {
   }
 
   // Use sort if provided, otherwise use order
-  const finalOrder = sort ? undefined : order;
+  const finalOrder = sort ? undefined : (order ?? undefined);
   const finalSort = sort;
 
   return {
@@ -536,7 +536,7 @@ function validateSearchQueryParams(req: Request): SearchQueryParams {
     events_status: events_status || 'active',
     sort: sort || 'volume_24hr',
     ascending,
-    recurrence,
+    recurrence: recurrence ?? undefined,
     tag_slug,
     presets,
   };

@@ -35,7 +35,7 @@ app.use(compression());
 app.use('/api/', apiLimiter);
 
 // Request logging middleware
-app.use((req: Request, res: Response, next) => {
+app.use((req: Request, _res: Response, next) => {
   logger.info({
     method: req.method,
     url: req.url,
@@ -46,7 +46,7 @@ app.use((req: Request, res: Response, next) => {
 });
 
 // Routes
-app.get('/', (req: Request, res: Response) => {
+app.get('/', (_req: Request, res: Response) => {
   res.json({
     message: 'Clutch Backend API',
     version: '1.0.0',

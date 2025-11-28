@@ -23,7 +23,7 @@ const router = Router();
  *                   type: string
  *                   example: 1.0.0
  */
-router.get('/', (req: Request, res: Response) => {
+router.get('/', (_req: Request, res: Response) => {
   res.json({
     message: 'Clutch Backend API',
     version: '1.0.0',

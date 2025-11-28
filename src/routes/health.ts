@@ -26,7 +26,7 @@ const router = Router();
  *                   type: string
  *                   example: 2024-01-01T00:00:00.000Z
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
     const dbStatus = await testDbConnection();
     const redisStatus = await testRedisConnection();
@@ -62,7 +62,7 @@ router.get('/', async (req: Request, res: Response) => {
  *       200:
  *         description: Service is ready
  */
-router.get('/ready', async (req: Request, res: Response) => {
+router.get('/ready', async (_req: Request, res: Response) => {
   try {
     const dbStatus = await testDbConnection();
     const redisStatus = await testRedisConnection();
@@ -97,7 +97,7 @@ router.get('/ready', async (req: Request, res: Response) => {
  *       200:
  *         description: Service is alive
  */
-router.get('/live', (req: Request, res: Response) => {
+router.get('/live', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'alive',
     timestamp: new Date().toISOString(),

@@ -20,7 +20,6 @@ import {
   SearchSort,
   EventsStatus,
 } from './polymarket.types';
-import crypto from 'crypto';
 
 const CACHE_TTL = parseInt(process.env.POLYMARKET_CACHE_TTL || '30', 10);
 
@@ -38,10 +37,12 @@ function getEndpointConfig(
   const ascending = params.ascending !== undefined ? params.ascending : false;
 
   // Map sort to order if sort is provided
-  let finalOrder = order;
+  // The API accepts string values for order, not just OrderBy types
+  let finalOrder: string = order;
   if (params.sort && !order) {
     // Map search sort options to order parameter
-    const sortMap: Record<string, OrderBy> = {
+    // Note: The API accepts these as strings even though they're not in the OrderBy type
+    const sortMap: Record<string, string> = {
       'volume_24hr': 'volume24hr',
       'volume': 'volume',
       'end_date': 'endDate',
@@ -131,15 +132,6 @@ function getEndpointConfig(
  */
 function getCacheKey(category: Category, offset: number, limit: number): string {
   return `polymarket:events:${category}:${offset}:${limit}`;
-}
-
-/**
- * Generate cache key for raw API response
- */
-function getRawCacheKey(endpoint: string, params: Record<string, any>): string {
-  const paramString = JSON.stringify(params);
-  const hash = crypto.createHash('md5').update(endpoint + paramString).digest('hex');
-  return `polymarket:raw:${hash}`;
 }
 
 /**
