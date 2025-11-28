@@ -35,6 +35,9 @@ RUN npm ci --only=production && \
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy source files for Swagger JSDoc scanning (needed at runtime)
+COPY --from=builder /app/src ./src
+
 # Change ownership
 RUN chown -R nodejs:nodejs /app
 

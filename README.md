@@ -170,6 +170,116 @@ docker-compose up -d
 - Check health: `curl http://localhost:3000/health`
 - View API docs: http://localhost:3000/api-docs
 
+## Nginx Reverse Proxy and SSL Setup
+
+This project includes nginx configuration for setting up a reverse proxy with SSL certificates using Let's Encrypt.
+
+### Prerequisites
+
+- Nginx installed on the server
+- Domain name pointing to your server (e.g., dev.api.tryclutch.app)
+- Ports 80 and 443 open in your firewall
+- Clutch application running on localhost:3000
+
+### Setup Steps
+
+1. **Install Nginx** (if not already installed):
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y nginx
+   ```
+
+2. **Run the setup script**:
+   ```bash
+   sudo ./scripts/setup-nginx.sh
+   ```
+
+   This script will:
+   - Copy the nginx configuration to `/etc/nginx/sites-available/clutch`
+   - Create a symbolic link in `/etc/nginx/sites-enabled/clutch`
+   - Test the nginx configuration
+   - Reload nginx
+   
+   **Note**: The initial configuration only includes HTTP (port 80). The HTTPS block will be added by certbot in the next step.
+
+3. **Obtain SSL Certificate with Certbot**:
+   ```bash
+   sudo certbot --nginx -d dev.api.tryclutch.app
+   ```
+
+   Certbot will automatically:
+   - Obtain SSL certificate from Let's Encrypt
+   - Configure SSL settings in the nginx config
+   - Set up HTTP to HTTPS redirect
+   - Configure automatic certificate renewal
+
+4. **Add WebSocket and SSE Support** (after certbot):
+   ```bash
+   sudo ./scripts/add-websocket-sse-config.sh
+   ```
+
+   This script adds WebSocket (`/ws`) and SSE (`/events`, `/sse`, `/stream`) location blocks to the HTTPS server block created by certbot.
+
+5. **Verify the Setup**:
+   ```bash
+   # Test nginx configuration
+   sudo nginx -t
+   
+   # Reload nginx
+   sudo systemctl reload nginx
+   
+   # Test HTTPS endpoint
+   curl -I https://dev.api.tryclutch.app
+   ```
+
+### Nginx Configuration Features
+
+The nginx configuration (`nginx/clutch.conf`) includes:
+
+- **HTTP Server Block**: Initial configuration for port 80 with Let's Encrypt challenge support
+- **WebSocket Support**: Location block for `/ws` endpoint (added after certbot via helper script) with proper upgrade headers and long connection timeouts
+- **SSE Support**: Server-Sent Events support (added after certbot) with buffering disabled for `/events`, `/sse`, and `/stream` endpoints
+- **Proxy Headers**: Proper forwarding of `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto`
+- **Long-lived Connections**: Extended timeouts (3600s) for WebSocket and SSE connections
+
+**Note**: The HTTPS server block with WebSocket and SSE configuration is commented out initially. Certbot will create the HTTPS block, and then you can run the helper script to add WebSocket/SSE support, or add them manually using the commented template in the config file.
+
+### Manual Configuration (Alternative)
+
+If you prefer to set up manually:
+
+1. Copy the configuration:
+   ```bash
+   sudo cp nginx/clutch.conf /etc/nginx/sites-available/clutch
+   ```
+
+2. Create symbolic link:
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/clutch /etc/nginx/sites-enabled/clutch
+   ```
+
+3. Test and reload:
+   ```bash
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+4. Run certbot as described above.
+
+### Certificate Renewal
+
+Certbot automatically sets up a renewal timer. Certificates are renewed automatically, but you can test renewal manually:
+
+```bash
+sudo certbot renew --dry-run
+```
+
+### Troubleshooting
+
+- **502 Bad Gateway**: Ensure the Clutch application is running on localhost:3000
+- **SSL Certificate Issues**: Verify DNS is pointing to your server and ports 80/443 are accessible
+- **WebSocket/SSE not working**: Check that the application endpoints match the nginx location blocks
+
 ## Development
 
 ### Scripts

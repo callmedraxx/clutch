@@ -1,6 +1,7 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import { Express } from 'express';
 import swaggerUi from 'swagger-ui-express';
+import path from 'path';
 
 const options: swaggerJsdoc.Options = {
   definition: {
@@ -19,7 +20,7 @@ const options: swaggerJsdoc.Options = {
         description: 'Development server',
       },
       {
-        url: 'https://api.example.com',
+        url: process.env.API_BASE_URL || `https://dev.api.tryclutch.app`,
         description: 'Production server',
       },
     ],
@@ -51,6 +52,21 @@ const options: swaggerJsdoc.Options = {
         },
       },
       schemas: {
+        TransformedOutcome: {
+          type: 'object',
+          description: 'Transformed outcome with probability and pricing information',
+          properties: {
+            label: { type: 'string', example: 'Yes' },
+            shortLabel: { type: 'string', example: 'YES' },
+            price: { type: 'string', example: '18.5', description: 'Price in cents' },
+            probability: { type: 'number', example: 18, description: 'Probability percentage (0-100)' },
+            volume: { type: 'number', example: 221599, description: 'Individual outcome volume' },
+            icon: { type: 'string', description: 'Outcome image URL' },
+            clobTokenId: { type: 'string', description: 'Token ID for trading' },
+            conditionId: { type: 'string', description: 'Condition ID' },
+            isWinner: { type: 'boolean', description: 'True if this outcome won (for resolved markets)' },
+          },
+        },
         TransformedMarket: {
           type: 'object',
           properties: {
@@ -69,8 +85,17 @@ const options: swaggerJsdoc.Options = {
             image: { type: 'string' },
             icon: { type: 'string' },
             description: { type: 'string' },
-            outcomes: { type: 'array', items: { type: 'string' } },
-            outcomePrices: { type: 'array', items: { type: 'string' } },
+            outcomes: { type: 'array', items: { type: 'string' }, description: 'Deprecated: use structuredOutcomes instead' },
+            outcomePrices: { type: 'array', items: { type: 'string' }, description: 'Deprecated: use structuredOutcomes instead' },
+            structuredOutcomes: {
+              type: 'array',
+              description: 'Structured outcomes array with probability and pricing information',
+              items: { $ref: '#/components/schemas/TransformedOutcome' },
+            },
+            isGroupItem: { type: 'boolean', description: 'Indicates if this is part of a group' },
+            groupItemTitle: { type: 'string', description: 'Title for group item' },
+            groupItemThreshold: { type: 'string', description: 'Threshold for group item' },
+            clobTokenIds: { type: 'array', items: { type: 'string' }, description: 'Token IDs for trading' },
             endDate: { type: 'string' },
             startDate: { type: 'string' },
             lastTradePrice: { type: 'number' },
@@ -81,6 +106,11 @@ const options: swaggerJsdoc.Options = {
             liquidity: { type: 'number' },
             createdAt: { type: 'string' },
             updatedAt: { type: 'string' },
+            closedTime: { type: 'string', description: 'Time when market was closed' },
+            resolvedBy: { type: 'string', description: 'Who resolved the market' },
+            resolutionSource: { type: 'string', description: 'Source of resolution' },
+            umaResolutionStatus: { type: 'string', description: 'UMA resolution status' },
+            automaticallyResolved: { type: 'boolean', description: 'Whether market was automatically resolved' },
           },
         },
         TransformedEvent: {
@@ -127,6 +157,14 @@ const options: swaggerJsdoc.Options = {
             endDate: { type: 'string' },
             createdAt: { type: 'string' },
             updatedAt: { type: 'string' },
+            hasGroupItems: { type: 'boolean', description: 'Indicates if event has group items' },
+            groupedOutcomes: {
+              type: 'array',
+              description: 'Aggregated outcomes from group items or best market, sorted by probability',
+              items: { $ref: '#/components/schemas/TransformedOutcome' },
+            },
+            closedTime: { type: 'string', description: 'Time when event was closed' },
+            isResolved: { type: 'boolean', description: 'Computed: true if event or all markets are resolved' },
           },
         },
         Pagination: {
@@ -155,7 +193,11 @@ const options: swaggerJsdoc.Options = {
       },
     },
   },
-  apis: ['./src/routes/*.ts', './src/server.ts'],
+  apis: [
+    // Use absolute paths to source files (needed for swagger-jsdoc to find JSDoc comments)
+    path.resolve(process.cwd(), 'src/routes/*.ts'),
+    path.resolve(process.cwd(), 'src/server.ts'),
+  ],
 };
 
 const swaggerSpec = swaggerJsdoc(options);
