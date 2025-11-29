@@ -6,9 +6,10 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import { logger } from '../../config/logger';
 import { PolymarketError, ErrorCode } from '../../utils/errors';
-import { PolymarketApiResponse } from './polymarket.types';
+import { PolymarketApiResponse, PriceHistoryResponse } from './polymarket.types';
 
 const API_BASE_URL = process.env.POLYMARKET_API_BASE_URL || 'https://gamma-api.polymarket.com';
+const CLOB_API_BASE_URL = process.env.POLYMARKET_CLOB_API_BASE_URL || 'https://clob.polymarket.com';
 const API_TIMEOUT = parseInt(process.env.POLYMARKET_API_TIMEOUT || '10000', 10);
 const MAX_RETRIES = parseInt(process.env.POLYMARKET_MAX_RETRIES || '3', 10);
 
@@ -38,12 +39,23 @@ function isRetryableError(error: AxiosError): boolean {
  */
 export class PolymarketClient {
   private client: AxiosInstance;
+  private clobClient: AxiosInstance;
   private requestCount: number = 0;
   private lastRequestTime: number = 0;
 
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
+      timeout: API_TIMEOUT,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    // Separate client for CLOB API to support concurrent requests
+    this.clobClient = axios.create({
+      baseURL: CLOB_API_BASE_URL,
       timeout: API_TIMEOUT,
       headers: {
         'Content-Type': 'application/json',
@@ -87,6 +99,48 @@ export class PolymarketClient {
       (error: AxiosError) => {
         logger.error({
           message: 'Polymarket API response error',
+          status: error.response?.status,
+          url: error.config?.url,
+          error: error.message,
+        });
+        return Promise.reject(error);
+      }
+    );
+
+    // CLOB client request interceptor for logging
+    this.clobClient.interceptors.request.use(
+      (config) => {
+        logger.info({
+          message: 'Polymarket CLOB API request',
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          params: config.params,
+        });
+        return config;
+      },
+      (error) => {
+        logger.error({
+          message: 'Polymarket CLOB API request error',
+          error: error.message,
+        });
+        return Promise.reject(error);
+      }
+    );
+
+    // CLOB client response interceptor for logging
+    this.clobClient.interceptors.response.use(
+      (response) => {
+        logger.info({
+          message: 'Polymarket CLOB API response',
+          status: response.status,
+          url: response.config.url,
+          historyLength: Array.isArray(response.data?.history) ? response.data.history.length : 0,
+        });
+        return response;
+      },
+      (error: AxiosError) => {
+        logger.error({
+          message: 'Polymarket CLOB API response error',
           status: error.response?.status,
           url: error.config?.url,
           error: error.message,
@@ -229,6 +283,138 @@ export class PolymarketClient {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Get price history from CLOB API
+   * Supports concurrent requests - each request is independent
+   */
+  async getClobPriceHistory(
+    clobTokenId: string,
+    params?: {
+      startTs?: number;
+      interval?: string;
+      fidelity?: number;
+    },
+    retries: number = MAX_RETRIES
+  ): Promise<PriceHistoryResponse> {
+    const queryParams: Record<string, string | number> = {
+      market: clobTokenId,
+    };
+
+    if (params?.startTs !== undefined) {
+      queryParams.startTs = params.startTs;
+    }
+
+    if (params?.interval) {
+      queryParams.interval = params.interval;
+    }
+
+    if (params?.fidelity !== undefined) {
+      queryParams.fidelity = params.fidelity;
+    }
+
+    const config: AxiosRequestConfig = {
+      method: 'GET',
+      url: '/prices-history',
+      params: queryParams,
+    };
+
+    let lastError: AxiosError | null = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        if (attempt > 0) {
+          const delay = getRetryDelay(attempt - 1);
+          logger.warn({
+            message: 'Retrying Polymarket CLOB API request',
+            attempt,
+            maxRetries: retries,
+            delay,
+            clobTokenId,
+          });
+          await this.sleep(delay);
+        }
+
+        const response = await this.clobClient.request<PriceHistoryResponse>(config);
+        return response.data;
+      } catch (error) {
+        lastError = error as AxiosError;
+
+        if (!isRetryableError(lastError) || attempt === retries) {
+          break;
+        }
+
+        // Check for rate limiting
+        if (lastError.response?.status === 429) {
+          const retryAfter = lastError.response.headers['retry-after'];
+          if (retryAfter) {
+            const delay = parseInt(retryAfter, 10) * 1000;
+            logger.warn({
+              message: 'Rate limited by Polymarket CLOB API',
+              retryAfter: delay,
+              clobTokenId,
+            });
+            await this.sleep(delay);
+          }
+        }
+      }
+    }
+
+    // Handle final error
+    return this.handleClobError(lastError!, clobTokenId);
+  }
+
+  /**
+   * Handle CLOB API errors and convert to custom errors
+   */
+  private handleClobError(error: AxiosError, clobTokenId: string): never {
+    logger.error({
+      message: 'Polymarket CLOB API request failed',
+      clobTokenId,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      error: error.message,
+      responseData: error.response?.data,
+    });
+
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      throw new PolymarketError(
+        ErrorCode.POLYMARKET_TIMEOUT,
+        `CLOB API request timeout: ${error.message}`
+      );
+    }
+
+    if (error.response) {
+      const status = error.response.status;
+
+      if (status === 429) {
+        throw new PolymarketError(
+          ErrorCode.POLYMARKET_RATE_LIMIT,
+          `CLOB API rate limited: ${status}`
+        );
+      }
+
+      if (status >= 500) {
+        throw new PolymarketError(
+          ErrorCode.POLYMARKET_API_ERROR,
+          `CLOB API server error: ${status} ${error.response.statusText}`
+        );
+      }
+
+      if (status >= 400) {
+        throw new PolymarketError(
+          ErrorCode.POLYMARKET_FETCH_FAILED,
+          `CLOB API client error: ${status} ${error.response.statusText}`
+        );
+      }
+    }
+
+    // Network error or unknown error
+    throw new PolymarketError(
+      ErrorCode.POLYMARKET_FETCH_FAILED,
+      `CLOB API network error: ${error.message}`
+    );
   }
 
   /**

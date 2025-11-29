@@ -1,121 +1,280 @@
 {
-  "id": "79029",
-  "title": "James Comey\u2019s indictment dismissed before trial?",
-  "slug": "james-comeys-indictment-dismissed-before-trial",
-  "description": "Speculation about a possible dismissal of James Comey\u2019s indictment has grown after Judge William Fitzpatrick criticized prosecutors\u2019 handling of the case. The trial is currently scheduled to begin on January 5, 2026.\n\nThis market will resolve to \"Yes\" if James Comey\u2019s criminal indictment is wholly dismissed before the start of his trial. Otherwise, this market will resolve to \"No\".\n\nPartial dismissals that result in the indictment remaining active will not be sufficient to trigger a \"Yes\" resolution.\n\nIf prosecutors withdraw charges before trial, or Comey otherwise ceases to face the indictment without a formal dismissal, this market will resolve to \"No\". This market will only resolve to \"Yes\" if the indictment is wholly dismissed before the trial officially begins.\n\nIf neither a dismissal nor the start of the trial has occurred by March 31, 2026, this market will resolve to \"No\".\n\nThe primary resolution source for this market will be information from the U.S. federal court system; however, a consensus of credible reporting will also be used.",
-  "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-  "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-  "totalVolume": 75492.729591,
-  "volume24Hr": 13548.28,
-  "volume1Wk": 71430.09357400001,
-  "volume1Mo": 75492.72959100001,
-  "volume1Yr": 75492.72959100001,
-  "openInterest": 0,
-  "competitive": 0,
-  "active": true,
-  "closed": true,
-  "archived": false,
-  "restricted": true,
-  "featured": false,
-  "commentCount": 8,
-  "markets": [
-    {
-      "id": "676632",
-      "question": "James Comey\u2019s indictment dismissed before trial?",
-      "slug": "james-comeys-indictment-dismissed-before-trial",
-      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a",
-      "volume": 75492.729591,
-      "volume24Hr": 13548.28,
-      "volume1Wk": 71430.09357400001,
-      "volume1Mo": 75492.72959100001,
-      "volume1Yr": 75492.72959100001,
-      "active": true,
-      "closed": true,
-      "archived": false,
-      "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-      "description": "Speculation about a possible dismissal of James Comey\u2019s indictment has grown after Judge William Fitzpatrick criticized prosecutors\u2019 handling of the case. The trial is currently scheduled to begin on January 5, 2026.\n\nThis market will resolve to \"Yes\" if James Comey\u2019s criminal indictment is wholly dismissed before the start of his trial. Otherwise, this market will resolve to \"No\".\n\nPartial dismissals that result in the indictment remaining active will not be sufficient to trigger a \"Yes\" resolution.\n\nIf prosecutors withdraw charges before trial, or Comey otherwise ceases to face the indictment without a formal dismissal, this market will resolve to \"No\". This market will only resolve to \"Yes\" if the indictment is wholly dismissed before the trial officially begins.\n\nIf neither a dismissal nor the start of the trial has occurred by March 31, 2026, this market will resolve to \"No\".\n\nThe primary resolution source for this market will be information from the U.S. federal court system; however, a consensus of credible reporting will also be used.",
-      "outcomes": [
-        "Yes",
-        "No"
-      ],
-      "outcomePrices": [
-        "1",
-        "0"
-      ],
-      "structuredOutcomes": [],
-      "isGroupItem": false,
-      "groupItemTitle": "",
-      "groupItemThreshold": "0",
-      "clobTokenIds": [
-        "12428480488781750394688972363687149509574804742209408054721539328865632660060",
-        "79978265468935980129515868929420582778792604689725162593505878316791453001317"
-      ],
-      "endDate": "2026-01-05T00:00:00Z",
-      "startDate": "2025-11-11T19:00:09.01019Z",
-      "lastTradePrice": 1,
-      "bestBid": 0.998,
-      "bestAsk": 1,
-      "spread": 0.002,
-      "liquidity": 0,
-      "createdAt": "2025-11-11T17:14:34.334137Z",
-      "updatedAt": "2025-11-28T11:03:25.574113Z",
-      "closedTime": "2025-11-27 16:08:05+00",
-      "resolvedBy": "0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7",
-      "resolutionSource": "",
-      "umaResolutionStatus": "resolved",
-      "automaticallyResolved": true
-    }
-  ],
-  "tags": [
-    {
-      "id": "2",
-      "label": "Politics",
-      "slug": "politics"
-    },
-    {
-      "id": "596",
-      "label": "Culture",
-      "slug": "pop-culture"
-    },
-    {
-      "id": "126",
-      "label": "Trump",
-      "slug": "trump"
-    },
-    {
-      "id": "101392",
-      "label": "fbi",
-      "slug": "fbi"
-    }
-  ],
-  "startDate": "2025-11-11T19:07:23.596967Z",
-  "endDate": "2026-01-05T00:00:00Z",
-  "createdAt": "2025-11-11T17:14:33.60018Z",
-  "updatedAt": "2025-11-28T11:03:41.762231Z",
-  "hasGroupItems": false,
-  "groupedOutcomes": [
-    {
-      "label": "Yes",
-      "shortLabel": "YES",
-      "price": "100.00",
-      "probability": 100,
-      "volume": 75493,
-      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-      "clobTokenId": "12428480488781750394688972363687149509574804742209408054721539328865632660060",
-      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a"
-    },
-    {
-      "label": "No",
-      "shortLabel": "NO",
-      "price": "0.00",
-      "probability": 0,
-      "volume": 0,
-      "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/james-comeys-indictment-be-dismissed-before-trial-fr9Vc5vdXSoX.jpg",
-      "clobTokenId": "79978265468935980129515868929420582778792604689725162593505878316791453001317",
-      "conditionId": "0x0381aef15afa72920c6125b7fafcdc0d14b4034c71ea847f67556fa57b515c0a"
-    }
-  ],
-  "closedTime": "2025-11-27 16:08:05+00",
-  "isResolved": true
-}
+        "id": "35090",
+        "title": "Fed decision in December?",
+        "slug": "fed-decision-in-december",
+        "description": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal fund range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's December 2025 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for December 9 - 10, 2025 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their December meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.\n",
+        "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+        "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+        "totalVolume": 184510021.795777,
+        "volume24Hr": 6109364.429937999,
+        "volume1Wk": 42309741.86305395,
+        "volume1Mo": 176764939.86347023,
+        "volume1Yr": 181245455.21755943,
+        "liquidity": 6265252.41475,
+        "openInterest": 0,
+        "competitive": 0.8824372917999515,
+        "active": true,
+        "closed": false,
+        "archived": false,
+        "restricted": true,
+        "featured": true,
+        "commentCount": 1893,
+        "markets": [
+          {
+            "id": "570363",
+            "question": "Fed increases interest rates by 25+ bps after December 2025 meeting?",
+            "slug": "fed-increases-interest-rates-by-25-bps-after-december-2025-meeting",
+            "conditionId": "0xfcd2fb666c5a346faee448e63267346a3ec394a52bce4c199877559da91cd2c1",
+            "volume": 84387870.566515,
+            "volume24Hr": 1603452.3009690002,
+            "volume1Wk": 14723169.311609944,
+            "volume1Mo": 80078787.77471738,
+            "volume1Yr": 83297021.22685374,
+            "active": true,
+            "closed": false,
+            "archived": false,
+            "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "description": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal fund range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's December 2025 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for December 9 - 10, 2025 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their December meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.",
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "outcomePrices": [
+              "0.0035",
+              "0.9965"
+            ],
+            "structuredOutcomes": [],
+            "isGroupItem": true,
+            "groupItemTitle": "25+ bps increase",
+            "groupItemThreshold": "3",
+            "clobTokenIds": [
+              "111653286751222233434552489231342053782305860121514128195211070982702807638967",
+              "83234538869110488222137558986831878044545184788704562505964003874631215840521"
+            ],
+            "endDate": "2025-12-10T00:00:00Z",
+            "startDate": "2025-07-31T19:47:28.374313Z",
+            "lastTradePrice": 0.004,
+            "bestBid": 0.003,
+            "bestAsk": 0.004,
+            "spread": 0.001,
+            "competitive": 0.8022384055993032,
+            "liquidity": 4002186.68666,
+            "createdAt": "2025-07-31T19:28:09.607045Z",
+            "updatedAt": "2025-11-28T23:55:35.717009Z",
+            "resolvedBy": "0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d"
+          },
+          {
+            "id": "570360",
+            "question": "Fed decreases interest rates by 50+ bps after December 2025 meeting?",
+            "slug": "fed-decreases-interest-rates-by-50-bps-after-december-2025-meeting",
+            "conditionId": "0x6903b766f5fda3d5b02f4472a6b4154419e78b7fd126c0b29ce17bb8e20b20cc",
+            "volume": 52367433.568628,
+            "volume24Hr": 3206624.0435199984,
+            "volume1Wk": 16667137.756398994,
+            "volume1Mo": 50203804.06001788,
+            "volume1Yr": 50654859.97479192,
+            "active": true,
+            "closed": false,
+            "archived": false,
+            "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "description": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal fund range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's December 2025 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for December 9 - 10, 2025 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their December meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.",
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "outcomePrices": [
+              "0.0115",
+              "0.9885"
+            ],
+            "structuredOutcomes": [],
+            "isGroupItem": true,
+            "groupItemTitle": "50+ bps decrease",
+            "groupItemThreshold": "0",
+            "clobTokenIds": [
+              "74018646712472971445258547247048869505144598783748525202442089895996249694683",
+              "21489772516410038586556744342392982044189999368638682594741395650226594484811"
+            ],
+            "endDate": "2025-12-10T00:00:00Z",
+            "startDate": "2025-07-31T19:47:24.365335Z",
+            "lastTradePrice": 0.012,
+            "bestBid": 0.011,
+            "bestAsk": 0.012,
+            "spread": 0.001,
+            "competitive": 0.8073421308059757,
+            "liquidity": 1099859.40079,
+            "createdAt": "2025-07-31T19:28:08.091057Z",
+            "updatedAt": "2025-11-29T00:02:10.826001Z",
+            "resolvedBy": "0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d"
+          },
+          {
+            "id": "570361",
+            "question": "Fed decreases interest rates by 25 bps after December 2025 meeting?",
+            "slug": "fed-decreases-interest-rates-by-25-bps-after-december-2025-meeting",
+            "conditionId": "0xcb111226a8271fed0c71bb5ec1bd67b2a4fd72f1eb08466e2180b9efa99d3f32",
+            "volume": 24951335.991062,
+            "volume24Hr": 766281.7528470003,
+            "volume1Wk": 5979482.079145025,
+            "volume1Mo": 24330720.446070194,
+            "volume1Yr": 24722510.177767962,
+            "active": true,
+            "closed": false,
+            "archived": false,
+            "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "description": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal fund range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's December 2025 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for December 9 - 10, 2025 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their December meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.",
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "outcomePrices": [
+              "0.865",
+              "0.135"
+            ],
+            "structuredOutcomes": [],
+            "isGroupItem": true,
+            "groupItemTitle": "25 bps decrease",
+            "groupItemThreshold": "1",
+            "clobTokenIds": [
+              "87769991026114894163580777793845523168226980076553814689875238288185044414090",
+              "13411284055273560855537595688801764123705139415061660246624128667183605973730"
+            ],
+            "endDate": "2025-12-10T00:00:00Z",
+            "startDate": "2025-07-31T19:47:26.391724Z",
+            "lastTradePrice": 0.86,
+            "bestBid": 0.86,
+            "bestAsk": 0.87,
+            "spread": 0.01,
+            "competitive": 0.8824372917999515,
+            "liquidity": 605518.0129,
+            "createdAt": "2025-07-31T19:28:08.60674Z",
+            "updatedAt": "2025-11-29T00:04:17.27548Z",
+            "resolvedBy": "0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d"
+          },
+          {
+            "id": "570362",
+            "question": "No change in Fed interest rates after December 2025 meeting?",
+            "slug": "no-change-in-fed-interest-rates-after-december-2025-meeting",
+            "conditionId": "0x58f4542341fcc66a2197877b7487ebe901b689ec42bcdbb0a070f5536d91459e",
+            "volume": 22803485.482299,
+            "volume24Hr": 533006.332602,
+            "volume1Wk": 4939952.7158999825,
+            "volume1Mo": 22151627.582664784,
+            "volume1Yr": 22571063.83814579,
+            "active": true,
+            "closed": false,
+            "archived": false,
+            "image": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "description": "The FED interest rates are defined in this market by the upper bound of the target federal funds range. The decisions on the target federal fund range are made by the Federal Open Market Committee (FOMC) meetings.\n\nThis market will resolve to the amount of basis points the upper bound of the target federal funds rate is changed by versus the level it was prior to the Federal Reserve's December 2025 meeting.\n\nIf the target federal funds rate is changed to a level not expressed in the displayed options, the change will be rounded up to the nearest 25 and will resolve to the relevant bracket. (e.g. if there's a cut/increase of 12.5 bps it will be considered to be 25 bps)\n\nThe resolution source for this market is the FOMC’s statement after its meeting scheduled for December 9 - 10, 2025 according to the official calendar: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm.\n\nThe level and change of the target federal funds rate is also published at the official website of the Federal Reserve at https://www.federalreserve.gov/monetarypolicy/openmarket.htm.\n\nThis market may resolve as soon as the FOMC’s statement for their December meeting with relevant data is issued. If no statement is released by the end date of the next scheduled meeting, this market will resolve to the \"No change\" bracket.",
+            "outcomes": [
+              "Yes",
+              "No"
+            ],
+            "outcomePrices": [
+              "0.115",
+              "0.885"
+            ],
+            "structuredOutcomes": [],
+            "isGroupItem": true,
+            "groupItemTitle": "No change",
+            "groupItemThreshold": "2",
+            "clobTokenIds": [
+              "80746058984644290629624903019922696017323803605256698757445938534814122585786",
+              "85970682092909806158465981896969493051954703765750954325716965011253694472992"
+            ],
+            "endDate": "2025-12-10T00:00:00Z",
+            "startDate": "2025-07-31T19:47:26.644562Z",
+            "lastTradePrice": 0.12,
+            "bestBid": 0.11,
+            "bestAsk": 0.12,
+            "spread": 0.01,
+            "competitive": 0.8709094471902284,
+            "liquidity": 553193.7525,
+            "createdAt": "2025-07-31T19:28:09.10556Z",
+            "updatedAt": "2025-11-29T00:14:46.037506Z",
+            "resolvedBy": "0x2F5e3684cb1F318ec51b00Edba38d79Ac2c0aA9d"
+          }
+        ],
+        "tags": [
+          {
+            "id": "2",
+            "label": "Politics",
+            "slug": "politics"
+          },
+          {
+            "id": "100196",
+            "label": "Fed Rates",
+            "slug": "fed-rates"
+          },
+          {
+            "id": "101800",
+            "label": "Economic Policy",
+            "slug": "economic-policy"
+          },
+          {
+            "id": "100328",
+            "label": "Economy",
+            "slug": "economy"
+          },
+          {
+            "id": "101550",
+            "label": "Jerome Powell",
+            "slug": "jerome-powell"
+          },
+          {
+            "id": "159",
+            "label": "Fed",
+            "slug": "fed"
+          }
+        ],
+        "startDate": "2025-07-31T19:48:22.854077Z",
+        "endDate": "2025-12-10T00:00:00Z",
+        "createdAt": "2025-07-31T19:28:07.156399Z",
+        "updatedAt": "2025-11-29T00:07:22.472974Z",
+        "hasGroupItems": true,
+        "groupedOutcomes": [
+          {
+            "label": "25 bps decrease",
+            "shortLabel": "25 ",
+            "price": "86.50",
+            "probability": 87,
+            "volume": 24951335.991062,
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "clobTokenId": "87769991026114894163580777793845523168226980076553814689875238288185044414090",
+            "conditionId": "0xcb111226a8271fed0c71bb5ec1bd67b2a4fd72f1eb08466e2180b9efa99d3f32"
+          },
+          {
+            "label": "No change",
+            "shortLabel": "NO ",
+            "price": "11.50",
+            "probability": 12,
+            "volume": 22803485.482299,
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "clobTokenId": "80746058984644290629624903019922696017323803605256698757445938534814122585786",
+            "conditionId": "0x58f4542341fcc66a2197877b7487ebe901b689ec42bcdbb0a070f5536d91459e"
+          },
+          {
+            "label": "50+ bps decrease",
+            "shortLabel": "50+",
+            "price": "1.15",
+            "probability": 1,
+            "volume": 52367433.568628,
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "clobTokenId": "74018646712472971445258547247048869505144598783748525202442089895996249694683",
+            "conditionId": "0x6903b766f5fda3d5b02f4472a6b4154419e78b7fd126c0b29ce17bb8e20b20cc"
+          },
+          {
+            "label": "25+ bps increase",
+            "shortLabel": "25+",
+            "price": "0.35",
+            "probability": 0,
+            "volume": 84387870.566515,
+            "icon": "https://polymarket-upload.s3.us-east-2.amazonaws.com/jerome+powell+glasses1.png",
+            "clobTokenId": "111653286751222233434552489231342053782305860121514128195211070982702807638967",
+            "conditionId": "0xfcd2fb666c5a346faee448e63267346a3ec394a52bce4c199877559da91cd2c1"
+          }
+        ],
+        "isResolved": false
+      }

@@ -5,6 +5,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { polymarketService } from '../services/polymarket/polymarket.service';
+import { marketClarificationsService } from '../services/polymarket/market-clarifications.service';
+import { priceHistoryService } from '../services/polymarket/price-history.service';
 import { ValidationError, ErrorCode, createErrorResponse } from '../utils/errors';
 import { logger } from '../config/logger';
 import {
@@ -15,6 +17,8 @@ import {
   SearchSort,
   EventsStatus,
   Recurrence,
+  PriceHistoryQueryParams,
+  PriceHistoryInterval,
 } from '../services/polymarket/polymarket.types';
 import { injectedUrlsService } from '../services/polymarket/injected-urls.service';
 
@@ -979,6 +983,341 @@ router.delete(
         message: 'Error clearing injected URLs',
         error: error instanceof Error ? error.message : String(error),
       });
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/market-clarifications:
+ *   get:
+ *     summary: Fetch market clarifications for one or multiple market IDs
+ *     description: Returns official clarifications from Polymarket for the specified market(s). Supports both single and multiple market IDs. Each result includes the market ID, clarifications array, and status (success/error).
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: query
+ *         name: market_id
+ *         required: true
+ *         schema:
+ *           oneOf:
+ *             - type: string
+ *             - type: array
+ *               items:
+ *                 type: string
+ *         description: Market ID(s) to fetch clarifications for. Can be a single ID or multiple IDs.
+ *         example: "570360"
+ *     responses:
+ *       200:
+ *         description: Market clarifications fetched successfully (may include partial failures)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     results:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           marketId:
+ *                             type: string
+ *                             example: "570360"
+ *                           clarifications:
+ *                             type: array
+ *                             description: Array of clarification objects
+ *                             items:
+ *                               type: object
+ *                           status:
+ *                             type: string
+ *                             enum: [success, error]
+ *                             example: "success"
+ *                           error:
+ *                             type: string
+ *                             description: Error message if status is error
+ *                             example: "Failed to fetch market clarification"
+ *       400:
+ *         description: Validation error (no market_id provided)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/market-clarifications',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      // Parse market_id parameter (can be single or array)
+      const marketIdParam = req.query.market_id;
+      
+      if (!marketIdParam) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'market_id query parameter is required'
+        );
+      }
+
+      // Convert to array format (handle both single and multiple values)
+      const marketIds: string[] = Array.isArray(marketIdParam)
+        ? (marketIdParam as string[])
+        : [marketIdParam as string];
+
+      // Validate market IDs (non-empty strings)
+      const validMarketIds = marketIds.filter((id) => {
+        if (!id || typeof id !== 'string' || id.trim() === '') {
+          logger.warn({
+            message: 'Invalid market ID provided',
+            marketId: id,
+          });
+          return false;
+        }
+        return true;
+      });
+
+      if (validMarketIds.length === 0) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'At least one valid market_id is required'
+        );
+      }
+
+      logger.info({
+        message: 'Market clarifications request received',
+        marketIds: validMarketIds,
+        ip: req.ip,
+      });
+
+      // Fetch clarifications for all market IDs
+      const results = await marketClarificationsService.getMarketClarifications(validMarketIds);
+
+      logger.info({
+        message: 'Market clarifications request completed',
+        total: results.results.length,
+        successful: results.results.filter((r) => r.status === 'success').length,
+        failed: results.results.filter((r) => r.status === 'error').length,
+      });
+
+      res.json({
+        success: true,
+        data: results,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in market clarifications endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        query: req.query,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/price-history:
+ *   get:
+ *     summary: Fetch price history for a CLOB token
+ *     description: Returns historical price data for a given clobTokenId. Supports either startDate-based queries (with startTs) or interval-based queries. Each request handles one token ID to enable concurrent frontend requests.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: query
+ *         name: clobTokenId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: CLOB token ID to fetch price history for
+ *         example: "87769991026114894163580777793845523168226980076553814689875238288185044414090"
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: ISO date string for start date. Backend will convert to startTs with -20s buffer. Mutually exclusive with interval.
+ *         example: "2025-07-31T19:47:26.391724Z"
+ *       - in: query
+ *         name: interval
+ *         schema:
+ *           type: string
+ *           enum: [1h, 6h, 1d, 1w, 1m]
+ *         description: 'Time interval for price history. Mutually exclusive with startDate. Default fidelity: 1h=1, 6h=1, 1d=5, 1w=30, 1m=180'
+ *         example: "1h"
+ *       - in: query
+ *         name: fidelity
+ *         schema:
+ *           type: integer
+ *         description: Optional fidelity override. Defaults to 720 for startDate mode, or interval-specific defaults for interval mode.
+ *         example: 720
+ *     responses:
+ *       200:
+ *         description: Price history fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     clobTokenId:
+ *                       type: string
+ *                       description: The CLOB token ID that was queried
+ *                     history:
+ *                       type: array
+ *                       description: Array of price history points
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           t:
+ *                             type: integer
+ *                             description: Unix timestamp in seconds
+ *                             example: 1754006409
+ *                           p:
+ *                             type: number
+ *                             description: Price/probability (0.0-1.0)
+ *                             example: 0.575
+ *             examples:
+ *               startDate:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     clobTokenId: "87769991026114894163580777793845523168226980076553814689875238288185044414090"
+ *                     history:
+ *                       - t: 1754006409
+ *                         p: 0.575
+ *                       - t: 1754049609
+ *                         p: 0.545
+ *               interval:
+ *                 value:
+ *                   success: true
+ *                   data:
+ *                     clobTokenId: "87769991026114894163580777793845523168226980076553814689875238288185044414090"
+ *                     history:
+ *                       - t: 1764391506
+ *                         p: 0.0035
+ *                       - t: 1764391565
+ *                         p: 0.0035
+ *       400:
+ *         description: Validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/price-history',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const clobTokenId = req.query.clobTokenId as string | undefined;
+      const startDate = req.query.startDate as string | undefined;
+      const interval = req.query.interval as PriceHistoryInterval | undefined;
+      const fidelity = req.query.fidelity
+        ? parseInt(req.query.fidelity as string, 10)
+        : undefined;
+
+      logger.info({
+        message: 'Price history request received',
+        clobTokenId,
+        startDate,
+        interval,
+        fidelity,
+        ip: req.ip,
+      });
+
+      // Validate clobTokenId is provided
+      if (!clobTokenId || typeof clobTokenId !== 'string' || clobTokenId.trim() === '') {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'clobTokenId query parameter is required and must be a non-empty string'
+        );
+      }
+
+      // Validate that startDate and interval are not both provided
+      if (startDate && interval) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'startDate and interval are mutually exclusive. Provide either startDate or interval, not both.'
+        );
+      }
+
+      // Validate interval if provided
+      if (interval && !['1h', '6h', '1d', '1w', '1m'].includes(interval)) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'interval must be one of: 1h, 6h, 1d, 1w, 1m'
+        );
+      }
+
+      // Validate fidelity if provided
+      if (fidelity !== undefined && (isNaN(fidelity) || fidelity < 1)) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'fidelity must be a positive integer'
+        );
+      }
+
+      // Build query params
+      const queryParams: PriceHistoryQueryParams = {
+        clobTokenId: clobTokenId.trim(),
+        ...(startDate && { startDate }),
+        ...(interval && { interval }),
+        ...(fidelity !== undefined && { fidelity }),
+      };
+
+      // Fetch price history
+      const result = await priceHistoryService.getPriceHistory(queryParams);
+
+      logger.info({
+        message: 'Price history request completed',
+        clobTokenId,
+        historyLength: result.history?.length || 0,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in price history endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        query: req.query,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
       next(error);
     }
   }

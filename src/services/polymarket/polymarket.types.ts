@@ -351,3 +351,58 @@ export interface SearchApiResponse {
   };
 }
 
+/**
+ * Market Clarification types
+ */
+export interface MarketClarification {
+  id?: string;
+  marketId?: string;
+  text?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  [key: string]: any; // Allow for additional fields from API
+}
+
+/**
+ * Raw API response for market clarifications (array of clarifications)
+ */
+export type MarketClarificationsResponse = MarketClarification[];
+
+/**
+ * Result for a single market's clarifications request
+ */
+export interface MarketClarificationResult {
+  marketId: string;
+  clarifications: MarketClarification[];
+  status: 'success' | 'error';
+  error?: string;
+}
+
+/**
+ * Response format for multiple market clarifications
+ */
+export interface MarketClarificationsResults {
+  results: MarketClarificationResult[];
+}
+
+/**
+ * Price History types for CLOB API
+ */
+export type PriceHistoryInterval = '1h' | '6h' | '1d' | '1w' | '1m';
+
+export interface PriceHistoryQueryParams {
+  clobTokenId: string;
+  startDate?: string; // ISO date string
+  interval?: PriceHistoryInterval;
+  fidelity?: number;
+}
+
+export interface PriceHistoryPoint {
+  t: number; // Unix timestamp in seconds
+  p: number; // Price/probability (0.0-1.0)
+}
+
+export interface PriceHistoryResponse {
+  history: PriceHistoryPoint[];
+}
+

@@ -271,7 +271,8 @@ function createMarketCard(event) {
     const resolutionDate = isResolved && closedTime ? `<div class="resolution-date">${formatResolutionDate(closedTime)}</div>` : '';
 
     return `
-        <div class="market-card ${isResolved ? 'market-card-resolved' : ''}" data-event-id="${event.id}">
+        <div class="market-card ${isResolved ? 'market-card-resolved' : ''}" 
+             data-event-id="${event.id}">
             <div class="card-header">
                 ${imageUrl ? `<img src="${imageUrl}" alt="${event.title}" class="card-image" onerror="this.style.display='none'">` : ''}
                 <div class="card-title">
@@ -481,7 +482,21 @@ async function loadSearchResults() {
         } else {
             events.forEach(event => {
                 const cardHtml = createMarketCard(event);
-                cardsGrid.insertAdjacentHTML('beforeend', cardHtml);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = cardHtml;
+                const card = tempDiv.firstElementChild;
+                
+                // Add click handler
+                card.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    console.log('Card element clicked (search), event data:', event);
+                    handleCardClick(event);
+                });
+                
+                // Also add cursor pointer style
+                card.style.cursor = 'pointer';
+                
+                cardsGrid.appendChild(card);
             });
         }
 
@@ -539,7 +554,21 @@ async function loadEvents() {
         } else {
             events.forEach(event => {
                 const cardHtml = createMarketCard(event);
-                cardsGrid.insertAdjacentHTML('beforeend', cardHtml);
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = cardHtml;
+                const card = tempDiv.firstElementChild;
+                
+                // Add click handler
+                card.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    console.log('Card element clicked, event data:', event);
+                    handleCardClick(event);
+                });
+                
+                // Also add cursor pointer style
+                card.style.cursor = 'pointer';
+                
+                cardsGrid.appendChild(card);
             });
         }
 
@@ -554,6 +583,258 @@ async function loadEvents() {
         loading.style.display = 'none';
         refreshBtn.disabled = false;
     }
+}
+
+// Price History Modal Functions
+const priceHistoryModal = document.getElementById('priceHistoryModal');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
+const modalClose = document.getElementById('modalClose');
+const chartsContainer = document.getElementById('chartsContainer');
+const chartLoading = document.getElementById('chartLoading');
+
+// Verify modal elements exist
+if (!priceHistoryModal || !modalTitle || !modalBody || !modalClose || !chartsContainer || !chartLoading) {
+    console.error('Modal elements not found! Check HTML structure.');
+}
+
+// Close modal handlers
+if (modalClose) {
+    modalClose.addEventListener('click', () => {
+        if (priceHistoryModal) {
+            priceHistoryModal.style.display = 'none';
+        }
+        // Destroy all charts when closing
+        if (window.priceHistoryCharts) {
+            window.priceHistoryCharts.forEach(chart => chart.destroy());
+            window.priceHistoryCharts = [];
+        }
+    });
+}
+
+if (priceHistoryModal) {
+    priceHistoryModal.addEventListener('click', (e) => {
+        if (e.target === priceHistoryModal) {
+            priceHistoryModal.style.display = 'none';
+            if (window.priceHistoryCharts) {
+                window.priceHistoryCharts.forEach(chart => chart.destroy());
+                window.priceHistoryCharts = [];
+            }
+        }
+    });
+}
+
+// Handle card click
+function handleCardClick(eventData) {
+    console.log('Card clicked!', eventData);
+    const outcomes = eventData.groupedOutcomes || [];
+    
+    console.log('Outcomes:', outcomes);
+    
+    // Only show price history if there are grouped outcomes with clobTokenIds
+    const outcomesWithTokens = outcomes.filter(o => o.clobTokenId);
+    
+    console.log('Outcomes with tokens:', outcomesWithTokens);
+    
+    if (outcomesWithTokens.length === 0) {
+        console.log('No outcomes with tokens found');
+        showError('No price history available for this event');
+        return;
+    }
+
+    console.log('Opening price history modal with', outcomesWithTokens.length, 'outcomes');
+    showPriceHistoryModal(eventData, outcomesWithTokens);
+}
+
+// Show price history modal
+async function showPriceHistoryModal(event, outcomes) {
+    console.log('showPriceHistoryModal called with', outcomes.length, 'outcomes');
+    
+    if (!priceHistoryModal || !modalTitle || !chartsContainer || !chartLoading) {
+        console.error('Modal elements not found!');
+        showError('Modal elements not initialized');
+        return;
+    }
+    
+    modalTitle.textContent = event.title || 'Price History';
+    chartsContainer.innerHTML = '';
+    chartLoading.style.display = 'block';
+    priceHistoryModal.style.display = 'flex';
+    
+    console.log('Modal displayed');
+
+    // Initialize charts array
+    window.priceHistoryCharts = [];
+
+    try {
+        // Fetch price history for all outcomes concurrently
+        const historyPromises = outcomes.map(async (outcome) => {
+            try {
+                // Use interval mode for recent data (1h interval)
+                const url = `${API_BASE_URL}/price-history?clobTokenId=${encodeURIComponent(outcome.clobTokenId)}&interval=1h`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (!data.success) {
+                    throw new Error(data.error?.message || 'Failed to fetch price history');
+                }
+
+                return {
+                    outcome,
+                    history: data.data?.history || []
+                };
+            } catch (error) {
+                console.error(`Error fetching history for ${outcome.label}:`, error);
+                return {
+                    outcome,
+                    history: [],
+                    error: error.message
+                };
+            }
+        });
+
+        const results = await Promise.all(historyPromises);
+        chartLoading.style.display = 'none';
+
+        // Create chart for each outcome
+        results.forEach((result, index) => {
+            if (result.error) {
+                chartsContainer.innerHTML += `
+                    <div class="chart-error">
+                        <h3>${escapeHtml(result.outcome.label)}</h3>
+                        <p>Error: ${escapeHtml(result.error)}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            if (result.history.length === 0) {
+                chartsContainer.innerHTML += `
+                    <div class="chart-error">
+                        <h3>${escapeHtml(result.outcome.label)}</h3>
+                        <p>No price history available</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Create chart container
+            const chartContainer = document.createElement('div');
+            chartContainer.className = 'chart-wrapper';
+            chartContainer.innerHTML = `
+                <h3 class="chart-title">${escapeHtml(result.outcome.label)}</h3>
+                <canvas id="chart-${index}"></canvas>
+            `;
+            chartsContainer.appendChild(chartContainer);
+
+            // Prepare chart data
+            const labels = result.history.map(point => {
+                const date = new Date(point.t * 1000);
+                return date.toLocaleString();
+            });
+            const prices = result.history.map(point => (point.p * 100).toFixed(2)); // Convert to percentage
+
+            // Create chart
+            const ctx = document.getElementById(`chart-${index}`).getContext('2d');
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Probability (%)',
+                        data: prices,
+                        borderColor: getColorForOutcome(index),
+                        backgroundColor: getColorForOutcome(index, 0.1),
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 0,
+                        pointHoverRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#e0e0e0',
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#e0e0e0',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#3a3a3a',
+                            borderWidth: 1,
+                            callbacks: {
+                                label: function(context) {
+                                    return `Probability: ${context.parsed.y}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 45,
+                                maxTicksLimit: 10
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                color: '#888',
+                                callback: function(value) {
+                                    return value + '%';
+                                }
+                            },
+                            grid: {
+                                color: '#2a2a2a'
+                            }
+                        }
+                    }
+                }
+            });
+
+            window.priceHistoryCharts.push(chart);
+        });
+
+    } catch (error) {
+        console.error('Error loading price history:', error);
+        chartLoading.style.display = 'none';
+        chartsContainer.innerHTML = `<div class="chart-error">Error loading price history: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+// Get color for outcome based on index
+function getColorForOutcome(index, alpha = 1) {
+    const colors = [
+        `rgba(0, 102, 255, ${alpha})`,  // Blue
+        `rgba(0, 255, 136, ${alpha})`, // Green
+        `rgba(255, 68, 68, ${alpha})`,  // Red
+        `rgba(255, 204, 0, ${alpha})`,  // Yellow
+        `rgba(153, 102, 255, ${alpha})`, // Purple
+        `rgba(255, 153, 0, ${alpha})`,  // Orange
+    ];
+    return colors[index % colors.length];
 }
 
 // Initialize
