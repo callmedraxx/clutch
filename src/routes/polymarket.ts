@@ -741,7 +741,7 @@ router.get(
  */
 router.get(
   '/injected-urls',
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const urls = injectedUrlsService.getAllUrls();
       const count = injectedUrlsService.getCount();
@@ -958,7 +958,7 @@ router.delete(
  */
 router.delete(
   '/injected-urls',
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (_req: Request, res: Response, next: NextFunction) => {
     try {
       logger.info({
         message: 'Clearing all injected URLs',
