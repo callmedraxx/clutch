@@ -7,7 +7,7 @@ import { logger } from '../../config/logger';
 import { polymarketClient } from './polymarket.client';
 import { transformEvents } from './polymarket.transformer';
 import { getTagIdForSport, isValidSport, getAvailableSports } from './sports-props.config';
-import { PolymarketApiResponse, TransformedEventsResponse, TransformedEvent } from './polymarket.types';
+import { PolymarketApiResponse, PolymarketEvent, TransformedEventsResponse, TransformedEvent } from './polymarket.types';
 import { PolymarketError, ErrorCode, ValidationError } from '../../utils/errors';
 
 /**
@@ -94,13 +94,27 @@ export class SportsPropsService {
       });
 
       // Fetch from API
-      const response = await polymarketClient.get<PolymarketApiResponse>(
+      const response = await polymarketClient.get<PolymarketApiResponse | PolymarketEvent[]>(
         '/events',
         params
       );
 
+      // Handle both wrapped response {data: [...]} and direct array [...]
+      let events: PolymarketEvent[] = [];
+      if (Array.isArray(response)) {
+        events = response as PolymarketEvent[];
+      } else if (response && 'data' in response) {
+        const responseData = (response as PolymarketApiResponse).data;
+        if (Array.isArray(responseData)) {
+          events = responseData;
+        } else if (responseData) {
+          // Single event wrapped in data
+          events = [responseData];
+        }
+      }
+
       // Transform the events
-      const transformedEvents = transformEvents(response.data || []);
+      const transformedEvents = transformEvents(events);
 
       // Calculate pagination
       const hasMore = transformedEvents.length === FIXED_LIMIT;
