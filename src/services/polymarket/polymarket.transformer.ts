@@ -395,6 +395,7 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
               shortLabel: (groupMarket.groupItemTitle || structured.label).slice(0, 3).toUpperCase(),
               volume: groupMarket.volume || structured.volume,
               icon: groupMarket.icon || structured.icon,
+              groupItemThreshold: groupMarket.groupItemThreshold,
               // Preserve isWinner flag if market is resolved
               isWinner: structured.isWinner,
             };
@@ -423,6 +424,7 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
               icon: groupMarket.icon,
               clobTokenId: clobTokenId,
               conditionId: groupMarket.conditionId,
+              groupItemThreshold: groupMarket.groupItemThreshold,
               isWinner: isWinner || undefined, // Only set if true
             };
           }

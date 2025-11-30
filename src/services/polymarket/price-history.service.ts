@@ -11,6 +11,7 @@ import {
   PriceHistoryInterval,
 } from './polymarket.types';
 import { ValidationError, ErrorCode } from '../../utils/errors';
+import { getCache, setCache } from '../../utils/cache';
 
 /**
  * Map interval to default fidelity value
@@ -32,6 +33,41 @@ const DEFAULT_STARTTS_FIDELITY = 720;
  * Buffer to subtract from startDate when converting to startTs (in seconds)
  */
 const STARTTS_BUFFER_SECONDS = 20;
+
+/**
+ * Cache TTL for price history (5 minutes / 300 seconds)
+ * Frontend polls every 30s, so this allows 10 cached responses before refetching
+ */
+const PRICE_HISTORY_CACHE_TTL = 300;
+
+/**
+ * Generate cache key for price history
+ */
+function getPriceHistoryCacheKey(params: PriceHistoryQueryParams, startTs?: number, interval?: string, fidelity?: number): string {
+  const { clobTokenId } = params;
+  const cacheParams: Record<string, string | number | undefined> = {
+    clobTokenId,
+    startTs,
+    interval,
+    fidelity,
+  };
+
+  // Filter out undefined values and create deterministic string
+  const filteredParams: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(cacheParams)) {
+    if (value !== undefined) {
+      filteredParams[key] = value;
+    }
+  }
+
+  // Sort keys to ensure consistent ordering
+  const sortedKeys = Object.keys(filteredParams).sort();
+  const paramString = sortedKeys
+    .map((key) => `${key}:${filteredParams[key]}`)
+    .join('|');
+
+  return `polymarket:price-history:${paramString}`;
+}
 
 /**
  * Price History Service
@@ -65,8 +101,30 @@ export class PriceHistoryService {
       finalFidelity = fidelity ?? INTERVAL_FIDELITY_MAP['1h'];
     }
 
+    // Generate cache key
+    const cacheKey = getPriceHistoryCacheKey(params, startTs, finalInterval, finalFidelity);
+
+    // Check cache first
+    try {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        logger.info({
+          message: 'Price history cache hit',
+          clobTokenId,
+          cacheKey,
+        });
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      logger.warn({
+        message: 'Cache read error, continuing with API fetch',
+        clobTokenId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     logger.info({
-      message: 'Fetching price history',
+      message: 'Fetching price history from API',
       clobTokenId,
       startTs,
       interval: finalInterval,
@@ -87,10 +145,36 @@ export class PriceHistoryService {
         historyLength: response.history?.length || 0,
       });
 
-      return {
-        ...response,
+      // Transform price (p) from decimal to percentage (multiply by 100)
+      // Keep timestamp (t) as is
+      const transformedHistory = (response.history || []).map((point) => ({
+        t: point.t, // Keep timestamp unchanged
+        p: Math.max(0, Math.min(100, Math.round(point.p * 100))), // Convert decimal to percentage (0-100)
+      }));
+
+      const result = {
+        history: transformedHistory,
         clobTokenId,
       };
+
+      // Cache the transformed result
+      try {
+        await setCache(cacheKey, JSON.stringify(result), PRICE_HISTORY_CACHE_TTL);
+        logger.debug({
+          message: 'Price history cached',
+          clobTokenId,
+          cacheKey,
+          ttl: PRICE_HISTORY_CACHE_TTL,
+        });
+      } catch (error) {
+        logger.warn({
+          message: 'Cache write error, continuing without cache',
+          clobTokenId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      return result;
     } catch (error) {
       logger.error({
         message: 'Error fetching price history',

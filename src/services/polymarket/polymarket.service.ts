@@ -7,7 +7,7 @@ import { logger } from '../../config/logger';
 import { polymarketClient } from './polymarket.client';
 import { transformEvents, mergePollingData } from './polymarket.transformer';
 import { getCache, setCache, deleteCache } from '../../utils/cache';
-import { CacheError, ErrorCode } from '../../utils/errors';
+import { CacheError, ErrorCode, PolymarketError } from '../../utils/errors';
 import {
   Category,
   EventsQueryParams,
@@ -18,11 +18,14 @@ import {
   SearchQueryParams,
   SearchApiResponse,
   SearchSort,
-  EventsStatus,
 } from './polymarket.types';
 import { injectedUrlsService } from './injected-urls.service';
 
-const CACHE_TTL = parseInt(process.env.POLYMARKET_CACHE_TTL || '30', 10);
+// Cache TTL: 7 minutes (420 seconds)
+// Since we're using on-demand fetching (no background polling),
+// we can use a longer cache to reduce API calls significantly
+// Frontend can poll frequently, but we only hit the API every 7 minutes per unique query
+const CACHE_TTL = parseInt(process.env.POLYMARKET_CACHE_TTL || '420', 10);
 
 /**
  * Get endpoint configuration for a category
@@ -266,13 +269,18 @@ export class PolymarketService {
       // Transform main data
       let transformedEvents = transformEvents(mainResponse.data || []);
 
-      // Merge polling data if available
-      if (pollingEvents.length > 0) {
+      // Get pagination info from API response BEFORE merging
+      // This preserves the correct pagination metadata from Polymarket
+      const apiPagination = mainResponse.pagination;
+
+      // Merge polling data if available (only when offset is 0 to avoid breaking pagination)
+      // When offset > 0, we're already on a specific page and shouldn't merge additional data
+      if (offset === 0 && pollingEvents.length > 0) {
         transformedEvents = mergePollingData(transformedEvents, pollingEvents);
       }
 
-      // For trending category, also fetch and merge injected URLs
-      if (category === 'trending') {
+      // For trending category, also fetch and merge injected URLs (only on first page)
+      if (offset === 0 && category === 'trending') {
         try {
           const injectedEvents = await this.fetchInjectedUrls();
           if (injectedEvents.length > 0) {
@@ -291,10 +299,33 @@ export class PolymarketService {
         }
       }
 
-      // Apply pagination
-      const totalResults = transformedEvents.length;
-      const paginatedEvents = transformedEvents.slice(offset, offset + limit);
-      const hasMore = offset + limit < totalResults;
+      // Handle pagination correctly:
+      // - For offset=0: May need to trim merged results to the requested limit
+      // - For offset>0: Use API response directly (already correctly paginated)
+      let paginatedEvents: TransformedEvent[];
+      let totalResults: number;
+      let hasMore: boolean;
+
+      if (offset === 0) {
+        // First page: may have merged data, so trim if needed
+        if (transformedEvents.length > limit) {
+          paginatedEvents = transformedEvents.slice(0, limit);
+          hasMore = true;
+          // If we have API pagination info, use it as baseline, but account for merged items
+          totalResults = apiPagination?.totalResults 
+            ? Math.max(apiPagination.totalResults, transformedEvents.length)
+            : transformedEvents.length;
+        } else {
+          paginatedEvents = transformedEvents;
+          hasMore = apiPagination?.hasMore ?? false;
+          totalResults = apiPagination?.totalResults ?? transformedEvents.length;
+        }
+      } else {
+        // Subsequent pages: use API response directly (already correctly paginated)
+        paginatedEvents = transformedEvents;
+        hasMore = apiPagination?.hasMore ?? false;
+        totalResults = apiPagination?.totalResults ?? transformedEvents.length;
+      }
 
       const response: TransformedEventsResponse = {
         events: paginatedEvents,
@@ -338,17 +369,38 @@ export class PolymarketService {
         category,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
+        isRateLimit: error instanceof PolymarketError && error.code === ErrorCode.POLYMARKET_RATE_LIMIT,
       });
 
-      // Try to return cached data as fallback
+      // For rate limit errors, always try to serve stale cache
+      // For other errors, also try cache as fallback
+      const isRateLimit = error instanceof PolymarketError && error.code === ErrorCode.POLYMARKET_RATE_LIMIT;
+      
+      if (isRateLimit) {
+        logger.warn({
+          message: 'Rate limited by Polymarket API, attempting to serve stale cache',
+          category,
+          cacheKey,
+        });
+      }
+
+      // Try to return cached data as fallback (even if expired for rate limits)
       try {
         const cached = await getCache(cacheKey);
         if (cached) {
           logger.info({
-            message: 'Returning cached data as fallback',
+            message: isRateLimit ? 'Serving stale cache due to rate limit' : 'Returning cached data as fallback',
             category,
+            cacheKey,
           });
           return JSON.parse(cached);
+        } else {
+          logger.warn({
+            message: 'No cached data available for fallback',
+            category,
+            cacheKey,
+            isRateLimit,
+          });
         }
       } catch (cacheError) {
         logger.error({
@@ -356,6 +408,14 @@ export class PolymarketService {
           category,
           error: cacheError instanceof Error ? cacheError.message : String(cacheError),
         });
+      }
+
+      // If rate limited and no cache, throw a more user-friendly error
+      if (isRateLimit) {
+        throw new PolymarketError(
+          ErrorCode.POLYMARKET_RATE_LIMIT,
+          'Service temporarily unavailable due to rate limiting. Please try again in a moment.'
+        );
       }
 
       throw error;
@@ -479,25 +539,6 @@ export class PolymarketService {
   }
 
   /**
-   * Map search sort to pagination order parameter
-   */
-  private mapSortToOrder(sort: SearchSort | undefined): string {
-    if (!sort) return 'volume24hr';
-    
-    const sortMap: Record<SearchSort, string> = {
-      volume_24hr: 'volume24hr',
-      end_date: 'endDate',
-      start_date: 'startDate',
-      volume: 'volume',
-      liquidity: 'liquidity',
-      closed_time: 'closedTime',
-      competitive: 'competitive',
-    };
-    
-    return sortMap[sort] || 'volume24hr';
-  }
-
-  /**
    * Map search sort to public-search sort parameter
    */
   private mapSortToPublicSearchSort(sort: SearchSort | undefined): string | undefined {
@@ -514,30 +555,6 @@ export class PolymarketService {
     };
     
     return sortMap[sort] || 'volume_24hr';
-  }
-
-  /**
-   * Map events_status to active/archived/closed flags
-   */
-  private mapEventsStatusToFlags(events_status: EventsStatus | undefined): {
-    active: boolean;
-    archived: boolean;
-    closed: boolean;
-  } {
-    if (events_status === 'resolved') {
-      return {
-        active: true,
-        archived: false,
-        closed: true,
-      };
-    }
-    
-    // Default to active
-    return {
-      active: true,
-      archived: false,
-      closed: false,
-    };
   }
 
   /**
@@ -655,114 +672,62 @@ export class PolymarketService {
     }
 
     try {
-      // Determine which endpoint to use
-      const usePaginationEndpoint = !!recurrence || !!tag_slug;
+      // Always use /public-search endpoint
+      const publicSearchSort = this.mapSortToPublicSearchSort(sort);
+      const presets = params.presets || ['EventsTitle', 'Events'];
       
-      if (usePaginationEndpoint) {
-        // Use /events/pagination endpoint
-        const flags = this.mapEventsStatusToFlags(events_status);
-        const order = this.mapSortToOrder(sort);
-        const offset = (page - 1) * limit_per_type;
-        
-        // Handle status-based sorting: if closed=true, default to closedTime unless another sort is specified
-        let finalOrder = order;
-        if (flags.closed && sort === 'volume_24hr') {
-          // For closed/resolved events, default to closedTime sort
-          finalOrder = 'closedTime';
-        }
-        
-        const paginationParams: Record<string, string | number | boolean> = {
-          limit: limit_per_type,
-          active: flags.active,
-          archived: flags.archived,
-          closed: flags.closed,
-          order: finalOrder,
-          ascending,
-          offset,
-        };
+      const searchParams: Record<string, string | number | boolean | string[]> = {
+        page,
+        limit_per_type,
+        type,
+        events_status,
+        sort: publicSearchSort || 'volume_24hr',
+        ascending,
+        presets, // Axios will convert array to multiple query params
+      };
 
-        if (recurrence) {
-          paginationParams.recurrence = recurrence;
-        }
-
-        if (tag_slug) {
-          paginationParams.tag_slug = tag_slug;
-        }
-
-        logger.info({
-          message: 'Fetching from Polymarket pagination endpoint',
-          path: '/events/pagination',
-          params: paginationParams,
-        });
-
-        const response = await polymarketClient.get<PolymarketApiResponse>(
-          '/events/pagination',
-          paginationParams
-        );
-
-        // Transform the response
-        const transformedEvents = transformEvents(response.data || []);
-
-        // Map pagination
-        const pagination = response.pagination || { hasMore: false, totalResults: 0 };
-        const totalResults = pagination.totalResults;
-        const hasMore = pagination.hasMore;
-
-        return {
-          events: transformedEvents,
-          pagination: {
-            hasMore,
-            totalResults,
-            offset,
-            limit: limit_per_type,
-          },
-        };
-      } else {
-        // Use /public-search endpoint
-        const publicSearchSort = this.mapSortToPublicSearchSort(sort);
-        const presets = params.presets || ['EventsTitle', 'Events'];
-        
-        const searchParams: Record<string, string | number | boolean | string[]> = {
-          q: q || '',
-          page,
-          limit_per_type,
-          type,
-          events_status,
-          sort: publicSearchSort || 'volume_24hr',
-          ascending,
-          presets, // Axios will convert array to multiple query params
-        };
-
-        logger.info({
-          message: 'Fetching from Polymarket public-search endpoint',
-          path: '/public-search',
-          params: searchParams,
-        });
-
-        const response = await polymarketClient.get<SearchApiResponse>(
-          '/public-search',
-          searchParams
-        );
-
-        // Transform the response
-        const transformedEvents = transformEvents(response.events || []);
-
-        // Map pagination from public-search format
-        const pagination = response.pagination || { hasMore: false, totalResults: 0 };
-        const totalResults = pagination.totalResults;
-        const hasMore = pagination.hasMore;
-        const offset = (page - 1) * limit_per_type;
-
-        return {
-          events: transformedEvents,
-          pagination: {
-            hasMore,
-            totalResults,
-            offset,
-            limit: limit_per_type,
-          },
-        };
+      // Add optional parameters if provided
+      if (q) {
+        searchParams.q = q;
       }
+
+      if (tag_slug) {
+        searchParams.tag_slug = tag_slug;
+      }
+
+      if (recurrence) {
+        searchParams.recurrence = recurrence;
+      }
+
+      logger.info({
+        message: 'Fetching from Polymarket public-search endpoint',
+        path: '/public-search',
+        params: searchParams,
+      });
+
+      const response = await polymarketClient.get<SearchApiResponse>(
+        '/public-search',
+        searchParams
+      );
+
+      // Transform the response
+      const transformedEvents = transformEvents(response.events || []);
+
+      // Map pagination from public-search format
+      const pagination = response.pagination || { hasMore: false, totalResults: 0 };
+      const totalResults = pagination.totalResults;
+      const hasMore = pagination.hasMore;
+      const offset = (page - 1) * limit_per_type;
+
+      return {
+        events: transformedEvents,
+        pagination: {
+          hasMore,
+          totalResults,
+          offset,
+          limit: limit_per_type,
+        },
+      };
     } catch (error) {
       logger.error({
         message: 'Error searching events',

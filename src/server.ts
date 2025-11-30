@@ -19,10 +19,43 @@ const PORT = process.env.PORT || 3000;
 
 // Security middleware
 app.use(helmet());
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+
+// CORS configuration - support multiple origins
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Get allowed origins from environment variable (comma-separated)
+    // Default to allowing all origins if not specified
+    const allowedOrigins = process.env.CORS_ORIGIN 
+      ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+      : [];
+
+    // If no CORS_ORIGIN is set, allow all origins (but note: credentials won't work with *)
+    // If specific origins are set, check against them
+    if (allowedOrigins.length === 0 || allowedOrigins.includes('*')) {
+      // Allow all origins when not specified or '*' is set
+      // Note: When using credentials: true, browser will reject '*' but we'll allow the origin
+      return callback(null, true);
+    }
+
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Reject origin
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+};
+
+app.use(cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -95,13 +128,7 @@ const gracefulShutdown = async (signal: string) => {
       });
     });
 
-    // Stop polling service
-    import('./services/polymarket/polling.service').then(({ pollingService }) => {
-      pollingService.stop();
-      logger.info('Polling service stopped');
-    }).catch(() => {
-      logger.error('Error stopping polling service');
-    });
+    // Polling service is disabled, no need to stop
   });
 };
 
@@ -122,14 +149,10 @@ const server = app.listen(PORT, async () => {
     logger.error('Failed to initialize connections:', error);
   }
 
-  // Start Polymarket polling service
-  try {
-    const { pollingService } = await import('./services/polymarket/polling.service');
-    pollingService.start();
-    logger.info('Polymarket polling service started');
-  } catch (error) {
-    logger.error('Failed to start polling service:', error);
-  }
+  // Background polling service disabled - using on-demand fetching with cache instead
+  // This reduces API calls and prevents rate limiting
+  // Data is fetched only when frontend requests it and cache is expired
+  logger.info('Using on-demand fetching with cache (background polling disabled)');
 });
 
 // Handle unhandled promise rejections

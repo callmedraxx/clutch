@@ -187,6 +187,7 @@ export interface TransformedOutcome {
   icon?: string; // Outcome image
   clobTokenId?: string; // For trading
   conditionId?: string;
+  groupItemThreshold?: string; // Threshold for group items
   isWinner?: boolean; // True if this outcome won (for resolved markets)
 }
 
@@ -399,7 +400,7 @@ export interface PriceHistoryQueryParams {
 
 export interface PriceHistoryPoint {
   t: number; // Unix timestamp in seconds
-  p: number; // Price/probability (0.0-1.0)
+  p: number; // Probability percentage (0-100), transformed from decimal (0.0-1.0)
 }
 
 export interface PriceHistoryResponse {
