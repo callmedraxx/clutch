@@ -7,6 +7,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { polymarketService } from '../services/polymarket/polymarket.service';
 import { marketClarificationsService } from '../services/polymarket/market-clarifications.service';
 import { priceHistoryService } from '../services/polymarket/price-history.service';
+import { sportsPropsService } from '../services/polymarket/sports-props.service';
 import { ValidationError, ErrorCode, createErrorResponse } from '../utils/errors';
 import { logger } from '../config/logger';
 import {
@@ -1304,6 +1305,197 @@ router.get(
     } catch (error) {
       logger.error({
         message: 'Error in price history endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        query: req.query,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/sports-props:
+ *   get:
+ *     summary: Fetch sports prop markets for a specific sport or all sports
+ *     description: |
+ *       Returns transformed sports prop markets (not game props). 
+ *       - If `sport` parameter is provided, returns props for that specific sport
+ *       - If `sport` is omitted or set to "all", returns props for all sports merged together
+ *       - Each event in the "all" response includes a `sport` field for frontend grouping
+ *       - When fetching "all", page N fetches page N for each sport, then merges and sorts by volume
+ *       Supports pagination via `page` or `offset` parameter (use one, not both).
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: query
+ *         name: sport
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [nfl, nba, mlb, nhl, ufc, epl, la-liga, all]
+ *           example: nfl
+ *         description: Sport category name. Omit or use "all" to fetch all sports merged together
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           default: 1
+ *         description: |
+ *           Page number for pagination. 
+ *           - For specific sport: each page returns 12 results
+ *           - For "all" sports: page N fetches page N for each sport, then merges results
+ *         example: 1
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *         description: |
+ *           Alternative to page: offset for pagination (mutually exclusive with page).
+ *           - For specific sport: offset directly (0, 12, 24, etc.)
+ *           - For "all" sports: offset is converted to page for each sport
+ *         example: 0
+ *     responses:
+ *       200:
+ *         description: Sports props fetched successfully (transformed data)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     events:
+ *                       type: array
+ *                       description: Transformed events with sports prop markets. When fetching all sports, each event includes a `sport` field.
+ *                       items:
+ *                         allOf:
+ *                           - $ref: '#/components/schemas/TransformedEvent'
+ *                           - type: object
+ *                             properties:
+ *                               sport:
+ *                                 type: string
+ *                                 description: Sport name (only present when fetching all sports)
+ *                                 example: nfl
+ *                     pagination:
+ *                       $ref: '#/components/schemas/Pagination'
+ *       400:
+ *         description: Validation error (invalid sport or page parameter)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/sports-props',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sport = req.query.sport as string | undefined;
+      
+      // Validate and parse page and offset parameters
+      const pageParam = req.query.page as string | undefined;
+      const offsetParam = req.query.offset as string | undefined;
+
+      logger.info({
+        message: 'Sports props request received',
+        sport,
+        page: pageParam,
+        offset: offsetParam,
+        ip: req.ip,
+      });
+
+      let page: number | undefined;
+      let offset: number | undefined;
+
+      if (pageParam !== undefined) {
+        const parsedPage = parseInt(pageParam, 10);
+        if (isNaN(parsedPage) || parsedPage < 1) {
+          throw new ValidationError(
+            ErrorCode.BAD_REQUEST,
+            `page must be a positive integer, got ${pageParam}`
+          );
+        }
+        page = parsedPage;
+      }
+
+      if (offsetParam !== undefined) {
+        const parsedOffset = parseInt(offsetParam, 10);
+        if (isNaN(parsedOffset) || parsedOffset < 0) {
+          throw new ValidationError(
+            ErrorCode.BAD_REQUEST,
+            `offset must be a non-negative integer, got ${offsetParam}`
+          );
+        }
+        offset = parsedOffset;
+      }
+
+      // If no sport specified or sport is "all", fetch all sports
+      if (!sport || sport.trim() === '' || sport.toLowerCase() === 'all') {
+        // Fetch all sports props
+        const result = await sportsPropsService.getAllSportsProps(page, offset);
+
+        logger.info({
+          message: 'All sports props request completed',
+          page,
+          offset,
+          eventCount: result.events.length,
+        });
+
+        res.json({
+          success: true,
+          data: result,
+        });
+        return;
+      }
+
+      // Validate sport parameter for specific sport fetch
+      if (typeof sport !== 'string' || sport.trim() === '') {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'sport query parameter must be a non-empty string or "all"'
+        );
+      }
+
+      // Fetch sports props for specific sport
+      const result = await sportsPropsService.getSportsProps(sport, page);
+
+      logger.info({
+        message: 'Sports props request completed',
+        sport,
+        page,
+        eventCount: result.events.length,
+        hasMore: result.pagination.hasMore,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in sports props endpoint',
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         query: req.query,
