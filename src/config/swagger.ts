@@ -1,5 +1,5 @@
 import swaggerJsdoc from 'swagger-jsdoc';
-import { Express } from 'express';
+import { Express, Request } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import path from 'path';
 
@@ -15,6 +15,10 @@ const options: swaggerJsdoc.Options = {
       },
     },
     servers: [
+      {
+        url: '/',
+        description: 'Current server (auto-detected)',
+      },
       {
         url: `http://localhost:${process.env.PORT || 3000}`,
         description: 'Development server',
@@ -203,15 +207,60 @@ const options: swaggerJsdoc.Options = {
 const swaggerSpec = swaggerJsdoc(options);
 
 export const setupSwagger = (app: Express): void => {
-  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  // Create a dynamic Swagger spec that uses the current server URL
+  const swaggerUiHandler = swaggerUi.setup(swaggerSpec, {
     customCss: '.swagger-ui .topbar { display: none }',
     customSiteTitle: 'Clutch Backend API Documentation',
-  }));
+    swaggerOptions: {
+      // Use the first server (relative path '/') by default
+      // This ensures all requests are same-origin
+      url: '/api-docs.json',
+      // Default to relative server URL to avoid CORS issues
+      defaultModelsExpandDepth: 1,
+      defaultModelExpandDepth: 1,
+      persistAuthorization: true,
+      // Configure request interceptor to use relative URLs
+      requestInterceptor: (req: any) => {
+        // Convert absolute URLs to relative URLs for same-origin requests
+        if (typeof req.url === 'string' && req.url.startsWith('http')) {
+          try {
+            const url = new URL(req.url);
+            // Extract pathname and query, making it relative
+            req.url = url.pathname + url.search;
+          } catch (e) {
+            // If URL parsing fails, use as-is
+          }
+        }
+        return req;
+      },
+    },
+  });
 
-  // Swagger JSON endpoint
-  app.get('/api-docs.json', (_req, res) => {
+  app.use('/api-docs', swaggerUi.serve, swaggerUiHandler);
+
+  // Swagger JSON endpoint with CORS headers
+  app.get('/api-docs.json', (_req: Request, res) => {
+    // Create a modified spec with the current server URL
+    const protocol = _req.protocol;
+    const host = _req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    // Clone the spec and update servers
+    const dynamicSpec = JSON.parse(JSON.stringify(swaggerSpec));
+    dynamicSpec.servers = [
+      {
+        url: '/',
+        description: 'Current server (same origin)',
+      },
+      {
+        url: baseUrl,
+        description: 'Current server (absolute URL)',
+      },
+      ...(dynamicSpec.servers?.filter((s: any) => s.url !== '/' && s.url !== baseUrl) || []),
+    ];
+
     res.setHeader('Content-Type', 'application/json');
-    res.send(swaggerSpec);
+    res.send(dynamicSpec);
   });
 };
 

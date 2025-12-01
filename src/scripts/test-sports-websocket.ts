@@ -58,7 +58,7 @@ async function main() {
       messages.forEach((msg, index) => {
         logger.info({
           message: `Message ${index + 1} analysis`,
-          message: msg,
+          msgData: msg,
           keys: Object.keys(msg),
           hasType: 'type' in msg,
           hasEvent: 'event' in msg,

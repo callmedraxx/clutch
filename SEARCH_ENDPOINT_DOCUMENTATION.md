@@ -536,7 +536,7 @@ async function onFinanceSearchClick() {
     ascending: false,
     limit_per_type: 20,
     type: 'events'
-  };
+  }; 
   
   try {
     const result = await handleFinanceSearch(searchText, filters, 1);

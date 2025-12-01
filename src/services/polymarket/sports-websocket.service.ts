@@ -19,8 +19,6 @@ export interface SportsWebSocketMessage {
 export class SportsWebSocketService {
   private ws: WebSocket | null = null;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 10;
-  private reconnectDelay: number = 1000;
   private isConnecting: boolean = false;
   private isConnected: boolean = false;
   private messageHistory: SportsWebSocketMessage[] = [];
@@ -269,7 +267,7 @@ export class SportsWebSocketService {
     
     logger.info({
       message: 'Sending message to Sports WebSocket',
-      message: messageString,
+      messageString: messageString,
     });
 
     this.ws.send(messageString);

@@ -307,8 +307,6 @@ export class GameEventsService {
     home?: string;
     away?: string;
   } {
-    const identifiers: { home?: string; away?: string } = {};
-
     // Strategy 1: Parse from event title (e.g., "Texans vs. Colts")
     const titleMatch = this.extractTeamsFromTitle(event.title);
     if (titleMatch.home && titleMatch.away) {

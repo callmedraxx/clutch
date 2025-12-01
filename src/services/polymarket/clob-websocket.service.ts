@@ -12,8 +12,6 @@ const CLOB_WS_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/market';
 export class ClobWebSocketService {
   private ws: WebSocket | null = null;
   private reconnectAttempts: number = 0;
-  private maxReconnectAttempts: number = 10;
-  private reconnectDelay: number = 1000;
   private isConnecting: boolean = false;
   private isConnected: boolean = false;
   private messageHistory: ClobWebSocketMessage[] = [];
@@ -316,7 +314,7 @@ export class ClobWebSocketService {
     
     logger.info({
       message: 'Sending message to CLOB WebSocket',
-      message: messageString,
+      messageString: messageString,
     });
 
     this.ws.send(messageString);
@@ -362,25 +360,6 @@ export class ClobWebSocketService {
     this.ws.ping();
   }
 
-  /**
-   * Schedule reconnection attempt
-   */
-  private scheduleReconnect(): void {
-    this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000);
-
-    logger.info({
-      message: 'Scheduling WebSocket reconnection',
-      attempt: this.reconnectAttempts,
-      delayMs: delay,
-    });
-
-    setTimeout(() => {
-      if (!this.isConnected && !this.isConnecting) {
-        this.connect();
-      }
-    }, delay);
-  }
 
   /**
    * Disconnect from WebSocket
