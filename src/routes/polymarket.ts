@@ -8,6 +8,12 @@ import { polymarketService } from '../services/polymarket/polymarket.service';
 import { marketClarificationsService } from '../services/polymarket/market-clarifications.service';
 import { priceHistoryService } from '../services/polymarket/price-history.service';
 import { sportsPropsService } from '../services/polymarket/sports-props.service';
+import { seriesSummaryService } from '../services/polymarket/series-summary.service';
+import { teamsService } from '../services/polymarket/teams.service';
+import { gameEventsService } from '../services/polymarket/game-events.service';
+import { orderbookService } from '../services/polymarket/orderbook.service';
+import { sportsPriceHistoryService } from '../services/polymarket/sports-price-history.service';
+import { getLeagueForSport } from '../services/polymarket/teams.config';
 import { ValidationError, ErrorCode, createErrorResponse } from '../utils/errors';
 import { logger } from '../config/logger';
 import {
@@ -1499,6 +1505,1024 @@ router.get(
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         query: req.query,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/series-summary/{seriesId}:
+ *   get:
+ *     summary: Fetch series summary by series ID
+ *     description: Returns series summary information including event dates, weeks, and earliest open date for a given series ID. This is a backend/internal endpoint that accepts series IDs directly.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: path
+ *         name: seriesId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Series ID number (e.g., '10187' for NFL 2025)
+ *         example: "10187"
+ *     responses:
+ *       200:
+ *         description: Series summary fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "10187"
+ *                     title:
+ *                       type: string
+ *                       example: "NFL 2025"
+ *                     slug:
+ *                       type: string
+ *                       example: "nfl-2025"
+ *                     eventDates:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                         format: date
+ *                       example: ["2025-09-04", "2025-09-05", "2025-09-07"]
+ *                     eventWeeks:
+ *                       type: array
+ *                       items:
+ *                         type: integer
+ *                       example: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+ *                     earliest_open_week:
+ *                       type: integer
+ *                       example: 12
+ *                     earliest_open_date:
+ *                       type: string
+ *                       format: date
+ *                       example: "2025-11-30"
+ *       400:
+ *         description: Validation error (invalid series ID)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/series-summary/:seriesId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const seriesId = req.params.seriesId;
+
+      logger.info({
+        message: 'Series summary request received',
+        seriesId,
+        ip: req.ip,
+      });
+
+      if (!seriesId) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Series ID is required'
+        );
+      }
+
+      const result = await seriesSummaryService.getSeriesSummary(seriesId);
+
+      logger.info({
+        message: 'Series summary request completed',
+        seriesId,
+        title: result.title,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in series summary endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        seriesId: req.params.seriesId,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/series-summary/sport/{sport}:
+ *   get:
+ *     summary: Fetch series summary by sport name
+ *     description: |
+ *       Returns series summary information for a given sport. The sport name is mapped to a series ID using the configuration.
+ *       This is a frontend-friendly endpoint that accepts sport names like 'nfl', 'nba', 'nhl', 'epl', etc.
+ *       The response includes event dates, weeks, and earliest open date for the sport's series.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: path
+ *         name: sport
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [nfl, nba, mlb, nhl, ufc, epl, la-liga]
+ *         description: Sport category name
+ *         example: nfl
+ *     responses:
+ *       200:
+ *         description: Series summary fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "10187"
+ *                     title:
+ *                       type: string
+ *                       example: "NFL 2025"
+ *                     slug:
+ *                       type: string
+ *                       example: "nfl-2025"
+ *                     eventDates:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                         format: date
+ *                       example: ["2025-09-04", "2025-09-05", "2025-09-07"]
+ *                     eventWeeks:
+ *                       type: array
+ *                       items:
+ *                         type: integer
+ *                       example: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+ *                     earliest_open_week:
+ *                       type: integer
+ *                       example: 12
+ *                     earliest_open_date:
+ *                       type: string
+ *                       format: date
+ *                       example: "2025-11-30"
+ *       400:
+ *         description: Validation error (invalid sport or sport not configured)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/series-summary/sport/:sport',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sport = req.params.sport;
+
+      logger.info({
+        message: 'Series summary by sport request received',
+        sport,
+        ip: req.ip,
+      });
+
+      if (!sport) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Sport parameter is required'
+        );
+      }
+
+      const result = await seriesSummaryService.getSeriesSummaryBySport(sport);
+
+      logger.info({
+        message: 'Series summary by sport request completed',
+        sport,
+        seriesId: result.id,
+        title: result.title,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in series summary by sport endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        sport: req.params.sport,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/teams/{sport}:
+ *   get:
+ *     summary: Fetch teams for a specific sport/league
+ *     description: |
+ *       Returns all teams for a given sport. The sport name is mapped to a league name using the configuration.
+ *       This endpoint accepts sport names like 'nfl', 'nba', 'nhl', 'epl', etc.
+ *       Teams are stored in PostgreSQL (production) or in-memory (development) and are periodically refreshed.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: path
+ *         name: sport
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [nfl, nba, mlb, nhl, ufc, epl, la-liga]
+ *         description: Sport category name
+ *         example: nfl
+ *     responses:
+ *       200:
+ *         description: Teams fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     teams:
+ *                       type: array
+ *                       description: Array of team objects
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 100045
+ *                           name:
+ *                             type: string
+ *                             example: "Washington Commanders"
+ *                           league:
+ *                             type: string
+ *                             example: "nfl"
+ *                           record:
+ *                             type: string
+ *                             example: "3-8-0"
+ *                           logo:
+ *                             type: string
+ *                             example: "https://polymarket-upload.s3.us-east-2.amazonaws.com/NFL+Team+Logos/WSH.png"
+ *                           abbreviation:
+ *                             type: string
+ *                             example: "was"
+ *                           alias:
+ *                             type: string
+ *                             example: "Commanders"
+ *                           providerId:
+ *                             type: integer
+ *                             example: 35
+ *                           color:
+ *                             type: string
+ *                             example: "#800000"
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                           updatedAt:
+ *                             type: string
+ *                             format: date-time
+ *                     league:
+ *                       type: string
+ *                       example: "nfl"
+ *       400:
+ *         description: Validation error (invalid sport)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/teams/:sport',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sport = req.params.sport;
+
+      logger.info({
+        message: 'Teams request received',
+        sport,
+        ip: req.ip,
+      });
+
+      if (!sport) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Sport parameter is required'
+        );
+      }
+
+      const teams = await teamsService.getTeamsBySport(sport);
+
+      // Get league name for response
+      const league = getLeagueForSport(sport.toLowerCase().trim()) || sport;
+
+      logger.info({
+        message: 'Teams request completed',
+        sport,
+        league,
+        teamCount: teams.length,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          teams,
+          league,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in teams endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        sport: req.params.sport,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/game-events/{sport}/{eventWeek}:
+ *   get:
+ *     summary: Fetch game events for a sport and event week
+ *     description: |
+ *       Returns game events for a given sport and event week. The sport name is mapped to a series ID using the configuration.
+ *       Events are transformed using the standard transformer and enriched with team details (homeTeam, awayTeam).
+ *       This endpoint accepts sport names like 'nfl', 'nba', 'nhl', 'epl', etc., and an event week number.
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: path
+ *         name: sport
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [nfl, nba, mlb, nhl, ufc, epl, la-liga]
+ *         description: Sport category name
+ *         example: nfl
+ *       - in: path
+ *         name: eventWeek
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Event week number
+ *         example: 13
+ *     responses:
+ *       200:
+ *         description: Game events fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     events:
+ *                       type: array
+ *                       description: Array of game events with team details
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             example: "12345"
+ *                           title:
+ *                             type: string
+ *                             example: "Texans vs. Colts"
+ *                           slug:
+ *                             type: string
+ *                             example: "nfl-hou-ind-2025-11-30"
+ *                           homeTeam:
+ *                             type: object
+ *                             description: Home team details (if matched)
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 100045
+ *                               name:
+ *                                 type: string
+ *                                 example: "Houston Texans"
+ *                               abbreviation:
+ *                                 type: string
+ *                                 example: "hou"
+ *                               logo:
+ *                                 type: string
+ *                                 example: "https://..."
+ *                               color:
+ *                                 type: string
+ *                                 example: "#03202f"
+ *                           awayTeam:
+ *                             type: object
+ *                             description: Away team details (if matched)
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 100046
+ *                               name:
+ *                                 type: string
+ *                                 example: "Indianapolis Colts"
+ *                               abbreviation:
+ *                                 type: string
+ *                                 example: "ind"
+ *                               logo:
+ *                                 type: string
+ *                                 example: "https://..."
+ *                               color:
+ *                                 type: string
+ *                                 example: "#003b7b"
+ *                           markets:
+ *                             type: array
+ *                             description: Array of markets for this event
+ *                           volume24Hr:
+ *                             type: number
+ *                             example: 12345.67
+ *                           startDate:
+ *                             type: string
+ *                             format: date-time
+ *                     sport:
+ *                       type: string
+ *                       example: "nfl"
+ *                     eventWeek:
+ *                       type: integer
+ *                       example: 13
+ *                     seriesId:
+ *                       type: string
+ *                       example: "10187"
+ *       400:
+ *         description: Validation error (invalid sport, invalid event week, or sport not configured)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       503:
+ *         description: Service unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/game-events/:sport/:eventWeek',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const sport = req.params.sport;
+      const eventWeekParam = req.params.eventWeek;
+
+      logger.info({
+        message: 'Game events request received',
+        sport,
+        eventWeek: eventWeekParam,
+        ip: req.ip,
+      });
+
+      if (!sport) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Sport parameter is required'
+        );
+      }
+
+      if (!eventWeekParam) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Event week parameter is required'
+        );
+      }
+
+      const eventWeek = parseInt(eventWeekParam, 10);
+      if (isNaN(eventWeek) || eventWeek < 1) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'Event week must be a positive integer'
+        );
+      }
+
+      const result = await gameEventsService.getGameEvents(sport, eventWeek);
+
+      logger.info({
+        message: 'Game events request completed',
+        sport,
+        eventWeek,
+        seriesId: result.seriesId,
+        eventCount: result.events.length,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in game events endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        sport: req.params.sport,
+        eventWeek: req.params.eventWeek,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/game-events/all:
+ *   get:
+ *     summary: Fetch game events for all configured sports
+ *     description: |
+ *       Returns game events for all sports configured in the games config. For each sport:
+ *       - Fetches the series summary to determine the earliest_open_week
+ *       - Uses that week to fetch game events
+ *       - Transforms and enriches events with team details
+ *       - Merges all events together, grouped by sport
+ *       If a sport fails (no series ID, API error, etc.), it is skipped and processing continues.
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: All sports game events fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     events:
+ *                       type: array
+ *                       description: All events flattened into a single array
+ *                       items:
+ *                         type: object
+ *                     sports:
+ *                       type: object
+ *                       description: Events grouped by sport
+ *                       additionalProperties:
+ *                         type: object
+ *                         properties:
+ *                           sport:
+ *                             type: string
+ *                             example: "nfl"
+ *                           seriesId:
+ *                             type: string
+ *                             example: "10187"
+ *                           eventWeek:
+ *                             type: integer
+ *                             example: 13
+ *                           eventCount:
+ *                             type: integer
+ *                             example: 16
+ *                           events:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                     totalEvents:
+ *                       type: integer
+ *                       example: 32
+ *                     sportsProcessed:
+ *                       type: integer
+ *                       example: 2
+ *                     sportsSkipped:
+ *                       type: integer
+ *                       example: 5
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.get(
+  '/game-events/all',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      logger.info({
+        message: 'All sports game events request received',
+        ip: req.ip,
+      });
+
+      const result = await gameEventsService.getAllSportsGameEvents();
+
+      logger.info({
+        message: 'All sports game events request completed',
+        totalEvents: result.totalEvents,
+        sportsProcessed: result.sportsProcessed,
+        sportsSkipped: result.sportsSkipped,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in all sports game events endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/orderbooks:
+ *   post:
+ *     summary: Fetch orderbooks for multiple token IDs
+ *     description: |
+ *       Returns orderbook data (bids, asks, market info) for multiple token IDs from Polymarket CLOB API.
+ *       The request body should contain an array of token IDs. Each orderbook includes:
+ *       - Market address/ID
+ *       - Asset/token ID
+ *       - Bids and asks arrays with price and size
+ *       - Market metadata (min_order_size, tick_size, neg_risk)
+ *     tags: [Polymarket]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - tokenIds
+ *             properties:
+ *               tokenIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of token IDs to fetch orderbooks for
+ *                 example: ["1362262070499612196536543020228646841715290686923724811547043222779627929033", "71153762617850327918008626736070729460267755184866151885318205408085249899501"]
+ *     responses:
+ *       200:
+ *         description: Orderbooks fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   description: Array of orderbook data
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       market:
+ *                         type: string
+ *                         example: "0xfb271be1fd36d39df248526573b47db09a806722fe1712f27d35279af149f1ff"
+ *                       asset_id:
+ *                         type: string
+ *                         example: "114782618692864822179421796791260116822757553171286093337624870274191590938528"
+ *                       timestamp:
+ *                         type: string
+ *                         example: "1764572247055"
+ *                       hash:
+ *                         type: string
+ *                         example: "3b03e419e89e1ed4389e86d5a0a7541dc1740325"
+ *                       bids:
+ *                         type: array
+ *                         description: Array of bid orders (buy orders)
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             price:
+ *                               type: string
+ *                               example: "0.35"
+ *                             size:
+ *                               type: string
+ *                               example: "2670"
+ *                       asks:
+ *                         type: array
+ *                         description: Array of ask orders (sell orders)
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             price:
+ *                               type: string
+ *                               example: "0.65"
+ *                             size:
+ *                               type: string
+ *                               example: "2670"
+ *                       min_order_size:
+ *                         type: string
+ *                         example: "5"
+ *                       tick_size:
+ *                         type: string
+ *                         example: "0.01"
+ *                       neg_risk:
+ *                         type: boolean
+ *                         example: false
+ *       400:
+ *         description: Validation error (invalid tokenIds format)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post(
+  '/orderbooks',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { tokenIds } = req.body;
+
+      logger.info({
+        message: 'Orderbooks request received',
+        tokenCount: Array.isArray(tokenIds) ? tokenIds.length : 0,
+        ip: req.ip,
+      });
+
+      if (!tokenIds) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'tokenIds is required in request body'
+        );
+      }
+
+      if (!Array.isArray(tokenIds)) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'tokenIds must be an array'
+        );
+      }
+
+      const orderbooks = await orderbookService.getOrderBooks(tokenIds);
+
+      logger.info({
+        message: 'Orderbooks request completed',
+        tokenCount: tokenIds.length,
+        orderbookCount: orderbooks.length,
+      });
+
+      res.json({
+        success: true,
+        data: orderbooks,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in orderbooks endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      if (error instanceof ValidationError) {
+        const errorResponse = createErrorResponse(error);
+        res.status(errorResponse.statusCode).json({
+          success: false,
+          error: errorResponse,
+        });
+        return;
+      }
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/sports-price-history:
+ *   post:
+ *     summary: Fetch price history for sports games markets
+ *     description: |
+ *       Returns historical price data for sports games markets from Polymarket CLOB API.
+ *       Uses different fidelity mapping than regular price history:
+ *       - 1h, 6h intervals: fidelity=1
+ *       - 1d interval: fidelity=5
+ *       - 1w, 1m intervals: fidelity=30 with startTs (startDate required)
+ *       Prices are transformed from decimal (0.01) to percentage (1) before returning.
+ *     tags: [Polymarket]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - market
+ *               - interval
+ *             properties:
+ *               market:
+ *                 type: string
+ *                 description: Token ID (market identifier)
+ *                 example: "55399073910241110321143566417499514761728667602612836054219373213410921198138"
+ *               interval:
+ *                 type: string
+ *                 enum: [1h, 6h, 1d, 1w, 1m]
+ *                 description: Time interval for price history
+ *                 example: "1h"
+ *               startDate:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Start date (required for 1w and 1m intervals, ISO 8601 format)
+ *                 example: "2025-01-01T00:00:00Z"
+ *     responses:
+ *       200:
+ *         description: Price history fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     market:
+ *                       type: string
+ *                       example: "55399073910241110321143566417499514761728667602612836054219373213410921198138"
+ *                     history:
+ *                       type: array
+ *                       description: Array of price history points
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           t:
+ *                             type: number
+ *                             description: Unix timestamp in seconds
+ *                             example: 1764082859
+ *                           p:
+ *                             type: number
+ *                             description: Price as percentage (0-100)
+ *                             example: 35
+ *       400:
+ *         description: Validation error (invalid parameters)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post(
+  '/sports-price-history',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { market, interval, startDate } = req.body;
+
+      logger.info({
+        message: 'Sports price history request received',
+        market,
+        interval,
+        startDate,
+        ip: req.ip,
+      });
+
+      if (!market) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'market is required in request body'
+        );
+      }
+
+      if (!interval) {
+        throw new ValidationError(
+          ErrorCode.BAD_REQUEST,
+          'interval is required in request body'
+        );
+      }
+
+      const result = await sportsPriceHistoryService.getPriceHistory(
+        market,
+        interval,
+        startDate
+      );
+
+      logger.info({
+        message: 'Sports price history request completed',
+        market,
+        interval,
+        historyLength: result.history?.length || 0,
+      });
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in sports price history endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        body: req.body,
       });
 
       if (error instanceof ValidationError) {

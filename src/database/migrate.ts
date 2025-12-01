@@ -27,6 +27,38 @@ export const runMigrations = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
     `);
     
+    // Create teams table for sports games
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS teams (
+        id INTEGER PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        league VARCHAR(50) NOT NULL,
+        record VARCHAR(50),
+        logo TEXT,
+        abbreviation VARCHAR(10),
+        alias VARCHAR(255),
+        provider_id INTEGER,
+        color VARCHAR(20),
+        api_created_at TIMESTAMP,
+        api_updated_at TIMESTAMP,
+        db_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        db_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create indexes for teams table
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_teams_league ON teams(league)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_teams_abbreviation ON teams(abbreviation)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_teams_league_abbreviation ON teams(league, abbreviation)
+    `);
+    
     await client.query('COMMIT');
     logger.info('Migrations completed successfully');
   } catch (error) {

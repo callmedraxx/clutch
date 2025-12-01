@@ -128,6 +128,14 @@ const gracefulShutdown = async (signal: string) => {
       });
     });
 
+    // Stop teams refresh service
+    import('./services/polymarket/teams-refresh.service').then(({ teamsRefreshService }) => {
+      teamsRefreshService.stop();
+      logger.info('Teams refresh service stopped');
+    }).catch(() => {
+      logger.error('Error stopping teams refresh service');
+    });
+
     // Polling service is disabled, no need to stop
   });
 };
@@ -153,6 +161,15 @@ const server = app.listen(PORT, async () => {
   // This reduces API calls and prevents rate limiting
   // Data is fetched only when frontend requests it and cache is expired
   logger.info('Using on-demand fetching with cache (background polling disabled)');
+
+  // Start teams refresh service
+  try {
+    const { teamsRefreshService } = await import('./services/polymarket/teams-refresh.service');
+    teamsRefreshService.start();
+    logger.info('Teams refresh service started');
+  } catch (error) {
+    logger.error('Failed to start teams refresh service:', error);
+  }
 });
 
 // Handle unhandled promise rejections

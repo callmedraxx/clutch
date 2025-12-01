@@ -407,3 +407,113 @@ export interface PriceHistoryResponse {
   history: PriceHistoryPoint[];
 }
 
+/**
+ * CLOB WebSocket Order Book Types
+ */
+export interface ClobOrderBookEntry {
+  price: string; // Price as string (e.g., "0.35")
+  size: string;  // Size/quantity as string (e.g., "15018")
+}
+
+export interface ClobOrderBookUpdate {
+  market: string; // Market address/ID (e.g., "0xf7742406d5edcdaf4449833f64f2d9ec32da27cb0a0f05ce057447dcbd5f85d3")
+  asset_id: string; // Token ID (e.g., "79582254082838461298332796975720054327136374562196770992070812664072096367481")
+  timestamp: string; // Timestamp as string (e.g., "1764527934271")
+  hash: string; // Hash identifier
+  bids: ClobOrderBookEntry[]; // Array of bid orders (buy orders)
+  asks: ClobOrderBookEntry[]; // Array of ask orders (sell orders)
+  event_type: 'book' | string; // Event type, typically "book" for order book updates
+  last_trade_price?: string; // Last trade price as string
+}
+
+export interface ClobPriceChange {
+  asset_id: string; // Token ID
+  best_ask: string; // Best ask price
+  best_bid: string; // Best bid price
+  hash: string; // Hash identifier
+  price: string; // Trade price
+  side: 'BUY' | 'SELL'; // Trade side
+  size: string; // Trade size
+}
+
+export interface ClobPriceChangeUpdate {
+  event_type: 'price_change';
+  market: string; // Market address/ID
+  price_changes: ClobPriceChange[]; // Array of price changes (typically 2 for binary markets - Yes/No)
+  timestamp: string; // Timestamp as string
+}
+
+/**
+ * Sports WebSocket Types
+ */
+export interface SportsGameUpdate {
+  gameId: number; // Unique game identifier
+  score: string; // Current score (e.g., "0-7", "2-0", "000-000|1-2|Bo3" for esports)
+  elapsed?: string; // Elapsed time (e.g., "0:42", "80", "15:50", "3:48")
+  period: string; // Current period (e.g., "Q1", "2H", "Q1", "3/3", "P2")
+  live: boolean; // Whether the game is currently live
+  ended: boolean; // Whether the game has ended
+  leagueAbbreviation: string; // League abbreviation (e.g., "nfl", "cbb", "dota2", "val", "lal", "es2")
+  homeTeam?: string; // Home team abbreviation (e.g., "MIA", "STJOE")
+  awayTeam?: string; // Away team abbreviation (e.g., "NO", "PRNCE")
+  turn?: string; // Team with current possession/turn (e.g., "mia", "no")
+  turnProviderId?: number; // Provider ID for turn tracking
+  status?: string; // Game status (e.g., "InProgress", "finished", "running", "HT")
+}
+
+/**
+ * Live Data WebSocket Types
+ */
+export interface LiveDataOrdersMatched {
+  asset: string; // Asset/token ID
+  bio?: string; // User bio
+  conditionId: string; // Condition ID for the market
+  eventSlug: string; // Event slug (e.g., "nfl-hou-ind-2025-11-30")
+  icon?: string; // Event icon URL
+  name?: string; // User name
+  outcome: string; // Outcome name (e.g., "Colts", "Texans")
+  outcomeIndex: number; // Index of the outcome (0, 1, etc.)
+  price: number; // Price at which the order was matched (0-1)
+  profileImage?: string; // User profile image URL
+  proxyWallet: string; // User's proxy wallet address
+  pseudonym?: string; // User pseudonym
+  side: 'BUY' | 'SELL'; // Order side
+  size: number; // Order size
+  slug: string; // Event slug (same as eventSlug)
+  timestamp: number; // Unix timestamp
+  title: string; // Event title (e.g., "Texans vs. Colts")
+  transactionHash: string; // Blockchain transaction hash
+}
+
+export interface ClobWebSocketMessage {
+  type?: string;
+  event?: string;
+  channel?: string;
+  data?: any;
+  [key: string]: any;
+}
+
+/**
+ * Orderbook Types for CLOB REST API
+ */
+export interface OrderBookEntry {
+  price: string; // Price as string (e.g., "0.35")
+  size: string; // Size/quantity as string (e.g., "2670")
+}
+
+export interface OrderBookResponse {
+  market: string; // Market address/ID (e.g., "0xfb271be1fd36d39df248526573b47db09a806722fe1712f27d35279af149f1ff")
+  asset_id: string; // Token ID (e.g., "114782618692864822179421796791260116822757553171286093337624870274191590938528")
+  timestamp: string; // Timestamp as string (e.g., "1764572247055")
+  hash: string; // Hash identifier (e.g., "3b03e419e89e1ed4389e86d5a0a7541dc1740325")
+  bids: OrderBookEntry[]; // Array of bid orders (buy orders)
+  asks: OrderBookEntry[]; // Array of ask orders (sell orders)
+  min_order_size: string; // Minimum order size (e.g., "5")
+  tick_size: string; // Price tick size (e.g., "0.01")
+  neg_risk: boolean; // Whether negative risk is enabled
+}
+
+export interface OrderBookRequest {
+  token_id: string; // Token ID to fetch orderbook for
+}
+
