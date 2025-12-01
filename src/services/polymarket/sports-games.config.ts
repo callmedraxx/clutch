@@ -27,15 +27,15 @@ const SPORTS_GAMES_CONFIG: SportsGamesConfig = {
     label: 'NFL',
   },
   nba: {
-    seriesId: '', // TODO: Add NBA series ID when available
+    seriesId: '10345', // TODO: Add NBA series ID when available
     label: 'NBA',
   },
   mlb: {
-    seriesId: '', // TODO: Add MLB series ID when available
+    seriesId: '3', // TODO: Add MLB series ID when available
     label: 'MLB',
   },
   nhl: {
-    seriesId: '', // TODO: Add NHL series ID when available
+    seriesId: '10346', // TODO: Add NHL series ID when available
     label: 'NHL',
   },
   ufc: {
@@ -43,11 +43,11 @@ const SPORTS_GAMES_CONFIG: SportsGamesConfig = {
     label: 'UFC',
   },
   epl: {
-    seriesId: '', // TODO: Add EPL series ID when available
+    seriesId: '10188', // TODO: Add EPL series ID when available
     label: 'English Premier League',
   },
-  'la-liga': {
-    seriesId: '', // TODO: Add La Liga series ID when available
+  'lal': {
+    seriesId: '10193', // TODO: Add La Liga series ID when available
     label: 'La Liga',
   },
 };

@@ -44,7 +44,7 @@ const SPORTS_PROPS_CONFIG: SportsPropsConfig = {
     tagId: '306', // TODO: Verify actual tag_id for EPL props
     label: 'English Premier League',
   },
-  'la-liga': {
+  'lal': {
     tagId: '780', // TODO: Verify actual tag_id for La Liga props
     label: 'La Liga',
   },
