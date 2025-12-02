@@ -59,6 +59,57 @@ export const runMigrations = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_teams_league_abbreviation ON teams(league, abbreviation)
     `);
     
+    // Create live_games table for storing live sports games
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS live_games (
+        id VARCHAR(255) PRIMARY KEY,
+        ticker VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        resolution_source TEXT,
+        start_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP NOT NULL,
+        image TEXT,
+        icon TEXT,
+        active BOOLEAN DEFAULT true,
+        closed BOOLEAN DEFAULT false,
+        archived BOOLEAN DEFAULT false,
+        restricted BOOLEAN,
+        liquidity NUMERIC,
+        volume NUMERIC,
+        volume_24hr NUMERIC,
+        competitive NUMERIC,
+        sport VARCHAR(50),
+        league VARCHAR(50),
+        series_id VARCHAR(50),
+        raw_data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
+    // Create indexes for live_games table
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_active ON live_games(active, closed)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_sport ON live_games(sport)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_series_id ON live_games(series_id)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_volume_24hr ON live_games(volume_24hr DESC NULLS LAST)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_start_date ON live_games(start_date)
+    `);
+    
     await client.query('COMMIT');
     logger.info('Migrations completed successfully');
   } catch (error) {

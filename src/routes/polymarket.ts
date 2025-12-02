@@ -14,6 +14,8 @@ import { gameEventsService } from '../services/polymarket/game-events.service';
 import { orderbookService } from '../services/polymarket/orderbook.service';
 import { sportsPriceHistoryService } from '../services/polymarket/sports-price-history.service';
 import { getLeagueForSport } from '../services/polymarket/teams.config';
+import { liveGamesService, getAllLiveGames, updateGame, refreshLiveGames, getInMemoryStats } from '../services/polymarket/live-games.service';
+import { sportsWebSocketService } from '../services/polymarket/sports-websocket.service';
 import { ValidationError, ErrorCode, createErrorResponse } from '../utils/errors';
 import { logger } from '../config/logger';
 import {
@@ -2538,6 +2540,475 @@ router.post(
     }
   }
 );
+
+// SSE clients for live games updates
+const sseClients: Set<Response> = new Set();
+
+/**
+ * @swagger
+ * /api/polymarket/live-games:
+ *   get:
+ *     summary: Fetch all live sports games
+ *     description: |
+ *       Returns all live sports games that match configured sports/leagues.
+ *       Games are stored in PostgreSQL (production) or in-memory (development).
+ *       Results are filtered by sports configured in sports-games.config.ts.
+ *       
+ *       **Note**: For Swagger testing, use query parameters to limit response size:
+ *       - `?limit=5` - Return only first 5 games
+ *       - `?includeMarkets=false` - Exclude market data (much smaller response)
+ *       - `?limit=5&includeMarkets=false` - Recommended for Swagger
+ *     tags: [Polymarket]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Limit the number of games returned (useful for testing)
+ *       - in: query
+ *         name: includeMarkets
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *         description: Include market data in response (set to false for smaller response)
+ *     responses:
+ *       200:
+ *         description: Live games fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     games:
+ *                       type: array
+ *                       description: Array of live game objects
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             example: "71963"
+ *                           ticker:
+ *                             type: string
+ *                             example: "ere-aja-gro-2025-11-30"
+ *                           slug:
+ *                             type: string
+ *                             example: "ere-aja-gro-2025-11-30"
+ *                           title:
+ *                             type: string
+ *                             example: "AFC Ajax vs. FC Groningen"
+ *                           description:
+ *                             type: string
+ *                           startDate:
+ *                             type: string
+ *                             format: date-time
+ *                           endDate:
+ *                             type: string
+ *                             format: date-time
+ *                           active:
+ *                             type: boolean
+ *                           closed:
+ *                             type: boolean
+ *                           sport:
+ *                             type: string
+ *                             example: "epl"
+ *                           league:
+ *                             type: string
+ *                             example: "epl"
+ *                           seriesId:
+ *                             type: string
+ *                             example: "10188"
+ *                           volume24hr:
+ *                             type: number
+ *                             example: 58409.31
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+  '/live-games',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      logger.info({
+        message: 'Live games request received',
+        ip: req.ip,
+      });
+
+      const games = await getAllLiveGames();
+      
+      // Optional: limit response size for Swagger/testing
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+      const limitedGames = limit && limit > 0 ? games.slice(0, limit) : games;
+      
+      // Optional: exclude markets for faster response (use ?includeMarkets=false)
+      const includeMarkets = req.query.includeMarkets !== 'false';
+      
+      // Clean and serialize games for JSON response
+      const gamesToReturn = limitedGames.map(game => {
+        // Create a clean copy without circular references
+        const cleanGame: any = {
+          id: game.id,
+          title: game.title,
+          slug: game.slug,
+          description: game.description,
+          image: game.image,
+          icon: game.icon,
+          totalVolume: game.totalVolume,
+          volume24Hr: game.volume24Hr,
+          volume1Wk: game.volume1Wk,
+          volume1Mo: game.volume1Mo,
+          volume1Yr: game.volume1Yr,
+          liquidity: game.liquidity,
+          openInterest: game.openInterest,
+          competitive: game.competitive,
+          active: game.active,
+          closed: game.closed,
+          archived: game.archived,
+          restricted: game.restricted,
+          featured: game.featured,
+          commentCount: game.commentCount,
+          startDate: game.startDate,
+          endDate: game.endDate,
+          sport: game.sport,
+          league: game.league,
+          seriesId: game.seriesId,
+          gameId: game.gameId,
+          score: game.score,
+          period: game.period,
+          elapsed: game.elapsed,
+          live: game.live,
+          ended: game.ended,
+          homeTeam: game.homeTeam,
+          awayTeam: game.awayTeam,
+          teamIdentifiers: game.teamIdentifiers,
+          createdAt: game.createdAt instanceof Date ? game.createdAt.toISOString() : game.createdAt,
+          updatedAt: game.updatedAt instanceof Date ? game.updatedAt.toISOString() : game.updatedAt,
+        };
+        
+        // Only include markets if requested
+        if (includeMarkets && game.markets) {
+          cleanGame.markets = game.markets;
+        }
+        
+        return cleanGame;
+      });
+
+      logger.info({
+        message: 'Live games request completed',
+        gameCount: games.length,
+        returnedCount: gamesToReturn.length,
+        includeMarkets,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          games: gamesToReturn,
+          total: games.length,
+          returned: gamesToReturn.length,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in live games endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/live-games/sse:
+ *   get:
+ *     summary: Server-Sent Events stream for live game updates
+ *     description: |
+ *       Establishes an SSE connection that pushes live game updates to the frontend.
+ *       Updates are sent when games are refreshed or when WebSocket updates are received.
+ *       The connection remains open until the client disconnects.
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: SSE connection established
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *               example: |
+ *                 event: update
+ *                 data: {"type":"games","games":[...]}
+ *                 
+ *                 event: ping
+ *                 data: {"timestamp":"2025-12-02T13:36:37.454Z"}
+ */
+router.get(
+  '/live-games/sse',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      logger.info({
+        message: 'SSE connection request received',
+        ip: req.ip,
+      });
+
+      // Set SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+      // Add client to set
+      sseClients.add(res);
+
+      // Send initial connection message
+      res.write(`event: connected\n`);
+      res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+
+      // Send initial games data
+      try {
+        const games = await getAllLiveGames();
+        res.write(`event: update\n`);
+        res.write(`data: ${JSON.stringify({ type: 'games', games })}\n\n`);
+      } catch (error) {
+        logger.error({
+          message: 'Error sending initial games data',
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      // Handle client disconnect
+      req.on('close', () => {
+        sseClients.delete(res);
+        logger.info({
+          message: 'SSE client disconnected',
+          remainingClients: sseClients.size,
+        });
+        res.end();
+      });
+
+      // Send periodic ping to keep connection alive
+      const pingInterval = setInterval(() => {
+        if (!sseClients.has(res)) {
+          clearInterval(pingInterval);
+          return;
+        }
+        
+        try {
+          res.write(`event: ping\n`);
+          res.write(`data: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+        } catch (error) {
+          clearInterval(pingInterval);
+          sseClients.delete(res);
+          logger.warn({
+            message: 'Error sending SSE ping, removing client',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }, 30000); // Ping every 30 seconds
+
+      // Clean up on disconnect
+      req.on('close', () => {
+        clearInterval(pingInterval);
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error setting up SSE connection',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      if (!res.headersSent) {
+        next(error);
+      }
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/live-games/refresh:
+ *   post:
+ *     summary: Manually refresh live games
+ *     description: |
+ *       Manually triggers a fetch and refresh of live games from Polymarket.
+ *       Useful for testing or forcing an immediate update.
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: Live games refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     message:
+ *                       type: string
+ *                     gamesStored:
+ *                       type: number
+ *       500:
+ *         description: Internal server error
+ */
+router.post(
+  '/live-games/refresh',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      logger.info({
+        message: 'Manual live games refresh requested',
+        ip: req.ip,
+      });
+
+      const gamesStored = await refreshLiveGames();
+
+      logger.info({
+        message: 'Manual live games refresh completed',
+        gamesStored,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          message: 'Live games refreshed successfully',
+          gamesStored,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in manual live games refresh',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/polymarket/live-games/debug:
+ *   get:
+ *     summary: Get in-memory storage debug info (development only)
+ *     description: |
+ *       Returns debug information about in-memory storage.
+ *       Only available in development mode.
+ *     tags: [Polymarket]
+ *     responses:
+ *       200:
+ *         description: Debug info retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     storageType:
+ *                       type: string
+ *                       example: "in-memory"
+ *                     count:
+ *                       type: number
+ *                     games:
+ *                       type: array
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+  '/live-games/debug',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const isProduction = process.env.NODE_ENV === 'production';
+      
+      if (isProduction) {
+        return res.status(403).json({
+          success: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Debug endpoint only available in development mode',
+          },
+        });
+      }
+
+      const stats = getInMemoryStats();
+      const serviceStatus = liveGamesService.getStatus();
+
+      logger.info({
+        message: 'Live games debug info requested',
+        ip: req.ip,
+        inMemoryCount: stats.count,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          storageType: 'in-memory',
+          count: stats.count,
+          games: stats.games,
+          serviceStatus,
+        },
+      });
+    } catch (error) {
+      logger.error({
+        message: 'Error in live games debug endpoint',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      next(error);
+    }
+  }
+);
+
+/**
+ * Broadcast game updates to all SSE clients
+ */
+export function broadcastGameUpdate(games: any[]): void {
+  const message = `event: update\n`;
+  const data = `data: ${JSON.stringify({ type: 'games', games })}\n\n`;
+  
+  const disconnectedClients: Response[] = [];
+  
+  for (const client of sseClients) {
+    try {
+      client.write(message + data);
+    } catch (error) {
+      disconnectedClients.push(client);
+      logger.warn({
+        message: 'Error broadcasting to SSE client, removing',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  
+  // Remove disconnected clients
+  for (const client of disconnectedClients) {
+    sseClients.delete(client);
+  }
+  
+  if (sseClients.size > 0) {
+    logger.debug({
+      message: 'Game update broadcasted to SSE clients',
+      clientCount: sseClients.size,
+      gameCount: games.length,
+    });
+  }
+}
 
 export default router;
 

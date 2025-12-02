@@ -46,7 +46,7 @@ const TEAMS_CONFIG: TeamsConfig = {
     league: 'epl',
     label: 'English Premier League',
   },
-  'la-liga': {
+  'lal': {
     league: 'lal',
     label: 'La Liga',
   },

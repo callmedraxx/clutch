@@ -136,6 +136,14 @@ const gracefulShutdown = async (signal: string) => {
       logger.error('Error stopping teams refresh service');
     });
 
+    // Stop live games service
+    import('./services/polymarket/live-games.service').then(({ liveGamesService }) => {
+      liveGamesService.stop();
+      logger.info('Live games service stopped');
+    }).catch(() => {
+      logger.error('Error stopping live games service');
+    });
+
     // Polling service is disabled, no need to stop
   });
 };
@@ -169,6 +177,20 @@ const server = app.listen(PORT, async () => {
     logger.info('Teams refresh service started');
   } catch (error) {
     logger.error('Failed to start teams refresh service:', error);
+  }
+
+  // Start live games service
+  try {
+    const { liveGamesService } = await import('./services/polymarket/live-games.service');
+    const { broadcastGameUpdate } = await import('./routes/polymarket');
+    
+    // Set up SSE broadcast callback
+    liveGamesService.setSSEBroadcastCallback(broadcastGameUpdate);
+    
+    liveGamesService.start();
+    logger.info('Live games service started');
+  } catch (error) {
+    logger.error('Failed to start live games service:', error);
   }
 });
 
