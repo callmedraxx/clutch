@@ -11,10 +11,9 @@ import { getLeagueForSport } from './teams.config';
 import { teamsService, Team } from './teams.service';
 import { transformEvents } from './polymarket.transformer';
 import { PolymarketEvent, TransformedEvent } from './polymarket.types';
-import { PolymarketError, ErrorCode } from '../../utils/errors';
 
 // Build ID may change - we'll need to fetch it dynamically or update periodically
-const POLYMARKET_LIVE_ENDPOINT = 'https://polymarket.com/_next/data/ydeAKiopMLZxqGsdeVui4/sports/live.json?slug=live';
+const POLYMARKET_LIVE_ENDPOINT = 'https://polymarket.com/_next/data/6w0cVAj-lCsqW5cBTIuDH/sports/live.json?slug=live';
 const POLLING_INTERVAL = 20 * 60 * 1000; // 20 minutes in milliseconds
 
 // In-memory storage for development
@@ -67,7 +66,17 @@ export interface LiveGameEvent {
 /**
  * Extended TransformedEvent with live game specific fields
  */
-export interface LiveGame extends TransformedEvent {
+export interface LiveGame extends Omit<TransformedEvent, 'createdAt' | 'updatedAt'> {
+  // Override createdAt/updatedAt to be Date instead of string
+  createdAt: Date;
+  updatedAt: Date;
+  
+  // Additional properties from raw event that aren't in TransformedEvent
+  ticker?: string;
+  resolutionSource?: string;
+  volume?: number;
+  volume24hr?: number; // Note: TransformedEvent has volume24Hr, but raw data uses volume24hr
+  
   // Live game specific fields
   sport?: string;
   league?: string;
@@ -90,8 +99,6 @@ export interface LiveGame extends TransformedEvent {
   };
   
   // Storage metadata
-  createdAt: Date;
-  updatedAt: Date;
   rawData: LiveGameEvent;
 }
 
@@ -119,7 +126,7 @@ function extractSportFromGame(game: LiveGameEvent): string | null {
   // Check against configured sports
   const sportsConfig = getAllSportsGamesConfig();
   
-  for (const [sport, config] of Object.entries(sportsConfig)) {
+  for (const [sport] of Object.entries(sportsConfig)) {
     // Check if slug or title contains sport indicators
     const sportIndicators: Record<string, string[]> = {
       nfl: ['nfl', 'football'],
@@ -453,6 +460,7 @@ async function transformAndEnrichGames(
 
 /**
  * Fetch live games from Polymarket endpoint
+ * Returns empty array on error to prevent service disruption
  */
 export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
   try {
@@ -467,7 +475,27 @@ export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
         'Accept': 'application/json',
       },
       timeout: 30000,
+      validateStatus: (status) => status < 500, // Don't throw on 4xx errors
     });
+
+    // Check for 404 or other client errors
+    if (response.status === 404) {
+      logger.warn({
+        message: 'Live games endpoint returned 404 - build ID may be outdated',
+        endpoint: POLYMARKET_LIVE_ENDPOINT,
+        suggestion: 'The Next.js build ID in the endpoint URL may need to be updated',
+      });
+      return [];
+    }
+
+    if (response.status >= 400) {
+      logger.warn({
+        message: 'Live games endpoint returned error status',
+        status: response.status,
+        endpoint: POLYMARKET_LIVE_ENDPOINT,
+      });
+      return [];
+    }
 
     // Extract events from the response
     const queries = response.data?.pageProps?.dehydratedState?.queries || [];
@@ -489,16 +517,22 @@ export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
 
     return eventArray;
   } catch (error) {
+    // Log error but return empty array instead of throwing
+    // This prevents the service from crashing and allows it to continue with cached data
+    const isAxiosError = error && typeof error === 'object' && 'response' in error;
+    const status = isAxiosError && (error as any).response?.status;
+    
     logger.error({
       message: 'Error fetching live games',
       error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
+      status: status || 'unknown',
+      endpoint: POLYMARKET_LIVE_ENDPOINT,
+      note: 'Returning empty array to prevent service disruption. Existing cached games will continue to be served.',
     });
     
-    throw new PolymarketError(
-      ErrorCode.POLYMARKET_FETCH_FAILED,
-      `Failed to fetch live games: ${error instanceof Error ? error.message : String(error)}`
-    );
+    // Return empty array instead of throwing to prevent service disruption
+    // The service will continue to serve any games already stored in the database/memory
+    return [];
   }
 }
 
@@ -1005,11 +1039,31 @@ export async function refreshLiveGames(): Promise<number> {
       message: 'Refreshing live games',
     });
 
-    // Fetch all games
+    // Fetch all games (returns empty array on error)
     const allGames = await fetchLiveGames();
+    
+    if (allGames.length === 0) {
+      logger.warn({
+        message: 'No games fetched from API - endpoint may be unavailable or build ID outdated',
+        note: 'Service will continue with existing cached games',
+      });
+      // Return count of existing games instead of 0
+      const existingGames = await getAllLiveGames();
+      return existingGames.length;
+    }
     
     // Filter by configured sports
     const filteredGames = filterGamesBySports(allGames);
+    
+    if (filteredGames.length === 0) {
+      logger.info({
+        message: 'No games match configured sports after filtering',
+        totalFetched: allGames.length,
+      });
+      // Return count of existing games
+      const existingGames = await getAllLiveGames();
+      return existingGames.length;
+    }
     
     // Transform and enrich with team data
     const liveGames = await transformAndEnrichGames(filteredGames);
@@ -1036,7 +1090,13 @@ export async function refreshLiveGames(): Promise<number> {
       message: 'Error refreshing live games',
       error: error instanceof Error ? error.message : String(error),
     });
-    throw error;
+    // Return count of existing games instead of throwing
+    try {
+      const existingGames = await getAllLiveGames();
+      return existingGames.length;
+    } catch {
+      return 0;
+    }
   }
 }
 

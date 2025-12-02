@@ -14,8 +14,7 @@ import { gameEventsService } from '../services/polymarket/game-events.service';
 import { orderbookService } from '../services/polymarket/orderbook.service';
 import { sportsPriceHistoryService } from '../services/polymarket/sports-price-history.service';
 import { getLeagueForSport } from '../services/polymarket/teams.config';
-import { liveGamesService, getAllLiveGames, updateGame, refreshLiveGames, getInMemoryStats } from '../services/polymarket/live-games.service';
-import { sportsWebSocketService } from '../services/polymarket/sports-websocket.service';
+import { liveGamesService, getAllLiveGames, refreshLiveGames, getInMemoryStats } from '../services/polymarket/live-games.service';
 import { ValidationError, ErrorCode, createErrorResponse } from '../utils/errors';
 import { logger } from '../config/logger';
 import {
@@ -2931,18 +2930,19 @@ router.post(
  */
 router.get(
   '/live-games/debug',
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const isProduction = process.env.NODE_ENV === 'production';
       
       if (isProduction) {
-        return res.status(403).json({
+        res.status(403).json({
           success: false,
           error: {
             code: 'FORBIDDEN',
             message: 'Debug endpoint only available in development mode',
           },
         });
+        return;
       }
 
       const stats = getInMemoryStats();
@@ -2963,6 +2963,7 @@ router.get(
           serviceStatus,
         },
       });
+      return;
     } catch (error) {
       logger.error({
         message: 'Error in live games debug endpoint',
@@ -2970,7 +2971,10 @@ router.get(
         stack: error instanceof Error ? error.stack : undefined,
       });
 
-      next(error);
+      if (!res.headersSent) {
+        next(error);
+      }
+      return;
     }
   }
 );

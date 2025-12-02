@@ -232,24 +232,26 @@ export class SportsWebSocketService {
 
       // Update live games database using gameId
       // The gameId from WebSocket should match the gameId stored in live_games table
-      try {
-        const { updateGameByGameId } = await import('./live-games.service');
-        await updateGameByGameId(gameUpdate.gameId, {
-          score: gameUpdate.score,
-          period: gameUpdate.period,
-          elapsed: gameUpdate.elapsed,
-          live: gameUpdate.live,
-          ended: gameUpdate.ended,
-          active: gameUpdate.live && !gameUpdate.ended,
-          closed: gameUpdate.ended,
-        });
-      } catch (error) {
-        logger.warn({
-          message: 'Error updating live game from WebSocket',
-          error: error instanceof Error ? error.message : String(error),
-          gameId: gameUpdate.gameId,
-        });
-      }
+      (async () => {
+        try {
+          const { updateGameByGameId } = await import('./live-games.service');
+          await updateGameByGameId(gameUpdate.gameId, {
+            score: gameUpdate.score,
+            period: gameUpdate.period,
+            elapsed: gameUpdate.elapsed,
+            live: gameUpdate.live,
+            ended: gameUpdate.ended,
+            active: gameUpdate.live && !gameUpdate.ended,
+            closed: gameUpdate.ended,
+          });
+        } catch (error) {
+          logger.warn({
+            message: 'Error updating live game from WebSocket',
+            error: error instanceof Error ? error.message : String(error),
+            gameId: gameUpdate.gameId,
+          });
+        }
+      })();
 
       return;
     }

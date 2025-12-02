@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "migrate": "npm run build && node dist/database/migrate.js",
+    "verify:live-games": "npm run build && node dist/scripts/verify-live-games.js",
     "test:clob-ws": "ts-node-dev --transpile-only src/scripts/test-clob-websocket.ts",
     "test:sports-ws": "ts-node-dev --transpile-only src/scripts/test-sports-websocket.ts",
     "test:live-data-ws": "ts-node-dev --transpile-only src/scripts/test-live-data-websocket.ts",

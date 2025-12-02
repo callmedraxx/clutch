@@ -83,10 +83,45 @@ export const runMigrations = async (): Promise<void> => {
         sport VARCHAR(50),
         league VARCHAR(50),
         series_id VARCHAR(50),
+        game_id INTEGER,
+        score VARCHAR(50),
+        period VARCHAR(50),
+        elapsed VARCHAR(50),
+        live BOOLEAN,
+        ended BOOLEAN,
+        transformed_data JSONB,
         raw_data JSONB,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
+    `);
+    
+    // Add missing columns if they don't exist (for existing tables)
+    await client.query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='game_id') THEN
+          ALTER TABLE live_games ADD COLUMN game_id INTEGER;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='score') THEN
+          ALTER TABLE live_games ADD COLUMN score VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='period') THEN
+          ALTER TABLE live_games ADD COLUMN period VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='elapsed') THEN
+          ALTER TABLE live_games ADD COLUMN elapsed VARCHAR(50);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='live') THEN
+          ALTER TABLE live_games ADD COLUMN live BOOLEAN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='ended') THEN
+          ALTER TABLE live_games ADD COLUMN ended BOOLEAN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='live_games' AND column_name='transformed_data') THEN
+          ALTER TABLE live_games ADD COLUMN transformed_data JSONB;
+        END IF;
+      END $$;
     `);
     
     // Create indexes for live_games table
@@ -108,6 +143,10 @@ export const runMigrations = async (): Promise<void> => {
     
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_live_games_start_date ON live_games(start_date)
+    `);
+    
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_game_id ON live_games(game_id)
     `);
     
     await client.query('COMMIT');
