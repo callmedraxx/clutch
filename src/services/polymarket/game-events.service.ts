@@ -12,6 +12,10 @@ import { seriesSummaryService } from './series-summary.service';
 import { transformEvents } from './polymarket.transformer';
 import { PolymarketEvent, TransformedEvent } from './polymarket.types';
 import { ValidationError, PolymarketError, ErrorCode } from '../../utils/errors';
+import { getCache, setCache } from '../../utils/cache';
+
+// Cache TTL: 5 minutes (300 seconds) for game events
+const GAME_EVENTS_CACHE_TTL = parseInt(process.env.GAME_EVENTS_CACHE_TTL || '300', 10);
 
 /**
  * Extended TransformedEvent with team details
@@ -108,6 +112,27 @@ export class GameEventsService {
       eventWeek,
     });
 
+    // Check cache first
+    const cacheKey = `game-events:${normalizedSport}:${eventWeek}:${seriesId}`;
+    try {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        logger.info({
+          message: 'Cache hit for game events',
+          sport: normalizedSport,
+          eventWeek,
+          cacheKey,
+        });
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      logger.warn({
+        message: 'Cache read error, continuing with API fetch',
+        sport: normalizedSport,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     try {
       // Fetch raw events from API
       const rawEvents = await this.fetchGameEventsFromAPI(seriesId, eventWeek);
@@ -118,6 +143,24 @@ export class GameEventsService {
       // Enrich events with team details
       const enrichedEvents = await this.enrichEventsWithTeams(transformedEvents, normalizedSport);
 
+      const result = {
+        events: enrichedEvents,
+        sport: normalizedSport,
+        eventWeek,
+        seriesId,
+      };
+
+      // Cache the result
+      try {
+        await setCache(cacheKey, JSON.stringify(result), GAME_EVENTS_CACHE_TTL);
+      } catch (error) {
+        logger.warn({
+          message: 'Cache write error',
+          sport: normalizedSport,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       logger.info({
         message: 'Game events fetched and enriched successfully',
         sport: normalizedSport,
@@ -126,12 +169,7 @@ export class GameEventsService {
         eventCount: enrichedEvents.length,
       });
 
-      return {
-        events: enrichedEvents,
-        sport: normalizedSport,
-        eventWeek,
-        seriesId,
-      };
+      return result;
     } catch (error) {
       logger.error({
         message: 'Error fetching game events',
@@ -177,15 +215,16 @@ export class GameEventsService {
     });
 
     try {
+      // Reduce limit to improve performance - 100 should be sufficient for most use cases
       const response = await polymarketClient.get<PolymarketEvent[]>(
         '/events',
         {
           series_id: seriesId,
-          limit: 500,
+          limit: 100, // Reduced from 500 for better performance
           event_week: eventWeek,
           order: 'startTime',
           ascending: false,
-          include_chat: true,
+          include_chat: false, // Disable chat for better performance
         }
       );
 
@@ -263,9 +302,27 @@ export class GameEventsService {
         error: error instanceof Error ? error.message : String(error),
       });
       // Continue without teams - events will still be returned
+      return events.map((e) => ({ ...e }));
     }
 
-    // Enrich each event with team details
+    // Create lookup maps for faster team matching
+    const teamsByAbbreviation = new Map<string, Team>();
+    const teamsByName = new Map<string, Team>();
+    const teamsByAlias = new Map<string, Team>();
+
+    for (const team of teams) {
+      if (team.abbreviation) {
+        teamsByAbbreviation.set(team.abbreviation.toLowerCase(), team);
+      }
+      if (team.name) {
+        teamsByName.set(team.name.toLowerCase(), team);
+      }
+      if (team.alias) {
+        teamsByAlias.set(team.alias.toLowerCase(), team);
+      }
+    }
+
+    // Enrich each event with team details using optimized lookup
     const enrichedEvents: GameEvent[] = events.map((event) => {
       const gameEvent: GameEvent = { ...event };
 
@@ -275,16 +332,28 @@ export class GameEventsService {
       if (teamIdentifiers.home || teamIdentifiers.away) {
         gameEvent.teamIdentifiers = teamIdentifiers;
 
-        // Match teams to team data
+        // Match teams to team data using lookup maps
         if (teamIdentifiers.home) {
-          const homeTeam = this.matchTeamToData(teamIdentifiers.home, teams, league);
+          const homeTeam = this.matchTeamUsingLookup(
+            teamIdentifiers.home,
+            teamsByAbbreviation,
+            teamsByName,
+            teamsByAlias,
+            teams
+          );
           if (homeTeam) {
             gameEvent.homeTeam = homeTeam;
           }
         }
 
         if (teamIdentifiers.away) {
-          const awayTeam = this.matchTeamToData(teamIdentifiers.away, teams, league);
+          const awayTeam = this.matchTeamUsingLookup(
+            teamIdentifiers.away,
+            teamsByAbbreviation,
+            teamsByName,
+            teamsByAlias,
+            teams
+          );
           if (awayTeam) {
             gameEvent.awayTeam = awayTeam;
           }
@@ -295,6 +364,66 @@ export class GameEventsService {
     });
 
     return enrichedEvents;
+  }
+
+  /**
+   * Match team using optimized lookup maps
+   * @param identifier - Team identifier
+   * @param teamsByAbbreviation - Map of teams by abbreviation
+   * @param teamsByName - Map of teams by name
+   * @param teamsByAlias - Map of teams by alias
+   * @param teams - Fallback team array
+   * @returns Matched team or null
+   */
+  private matchTeamUsingLookup(
+    identifier: string,
+    teamsByAbbreviation: Map<string, Team>,
+    teamsByName: Map<string, Team>,
+    teamsByAlias: Map<string, Team>,
+    teams: Team[]
+  ): Team | null {
+    if (!identifier || teams.length === 0) {
+      return null;
+    }
+
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+
+    // Strategy 1: Exact match on abbreviation (O(1) lookup)
+    const abbrevMatch = teamsByAbbreviation.get(normalizedIdentifier);
+    if (abbrevMatch) {
+      return abbrevMatch;
+    }
+
+    // Strategy 2: Exact match on name (O(1) lookup)
+    const nameMatch = teamsByName.get(normalizedIdentifier);
+    if (nameMatch) {
+      return nameMatch;
+    }
+
+    // Strategy 3: Exact match on alias (O(1) lookup)
+    const aliasMatch = teamsByAlias.get(normalizedIdentifier);
+    if (aliasMatch) {
+      return aliasMatch;
+    }
+
+    // Strategy 4: Partial/fuzzy match (fallback to linear search only when needed)
+    for (const team of teams) {
+      const teamNameLower = team.name.toLowerCase();
+      const teamAbbrevLower = team.abbreviation?.toLowerCase() || '';
+      
+      if (
+        teamNameLower.includes(normalizedIdentifier) ||
+        normalizedIdentifier.includes(teamNameLower) ||
+        (teamAbbrevLower && (
+          teamAbbrevLower.includes(normalizedIdentifier) ||
+          normalizedIdentifier.includes(teamAbbrevLower)
+        ))
+      ) {
+        return team;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -469,98 +598,11 @@ export class GameEventsService {
     return {};
   }
 
-  /**
-   * Match a team identifier to team data
-   * @param identifier - Team name or abbreviation
-   * @param teams - Array of teams to search
-   * @param league - League name for logging
-   * @returns Matched team or null
-   */
-  private matchTeamToData(
-    identifier: string,
-    teams: Team[],
-    league: string
-  ): Team | null {
-    if (!identifier || teams.length === 0) {
-      return null;
-    }
-
-    const normalizedIdentifier = identifier.trim().toLowerCase();
-
-    // Strategy 1: Exact match on abbreviation (case-insensitive)
-    const abbrevMatch = teams.find(
-      (team) =>
-        team.abbreviation &&
-        team.abbreviation.toLowerCase() === normalizedIdentifier
-    );
-    if (abbrevMatch) {
-      return abbrevMatch;
-    }
-
-    // Strategy 2: Exact match on name (case-insensitive)
-    const nameMatch = teams.find(
-      (team) => team.name.toLowerCase() === normalizedIdentifier
-    );
-    if (nameMatch) {
-      return nameMatch;
-    }
-
-    // Strategy 3: Partial match on name (contains)
-    const partialMatch = teams.find(
-      (team) =>
-        team.name.toLowerCase().includes(normalizedIdentifier) ||
-        normalizedIdentifier.includes(team.name.toLowerCase())
-    );
-    if (partialMatch) {
-      return partialMatch;
-    }
-
-    // Strategy 4: Match on alias
-    const aliasMatch = teams.find(
-      (team) =>
-        team.alias &&
-        team.alias.toLowerCase() === normalizedIdentifier
-    );
-    if (aliasMatch) {
-      return aliasMatch;
-    }
-
-    // Strategy 5: Fuzzy match - check if identifier is part of team name or vice versa
-    // (e.g., "Hou" matches "Houston Texans")
-    for (const team of teams) {
-      const teamNameLower = team.name.toLowerCase();
-      const teamAbbrevLower = team.abbreviation?.toLowerCase() || '';
-      
-      // Check if identifier is a substring of team name or abbreviation
-      if (
-        teamNameLower.includes(normalizedIdentifier) ||
-        normalizedIdentifier.includes(teamNameLower) ||
-        (teamAbbrevLower && (
-          teamAbbrevLower.includes(normalizedIdentifier) ||
-          normalizedIdentifier.includes(teamAbbrevLower)
-        ))
-      ) {
-        return team;
-      }
-    }
-
-    logger.debug({
-      message: 'Could not match team identifier',
-      identifier,
-      league,
-      availableTeams: teams.map((t) => ({
-        name: t.name,
-        abbreviation: t.abbreviation,
-        alias: t.alias,
-      })),
-    });
-
-    return null;
-  }
 
   /**
    * Fetch game events for all configured sports
    * Gets earliest_open_week from each sport's series summary and fetches events
+   * Processes sports in parallel for better performance
    * @returns All game events grouped by sport
    */
   async getAllSportsGameEvents(): Promise<AllSportsGameEventsResponse> {
@@ -568,15 +610,32 @@ export class GameEventsService {
       message: 'Fetching game events for all sports',
     });
 
+    // Check cache first
+    const cacheKey = 'game-events:all-sports';
+    try {
+      const cached = await getCache(cacheKey);
+      if (cached) {
+        logger.info({
+          message: 'Cache hit for all sports game events',
+          cacheKey,
+        });
+        return JSON.parse(cached);
+      }
+    } catch (error) {
+      logger.warn({
+        message: 'Cache read error, continuing with API fetch',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const allSportsConfig = getAllSportsGamesConfig();
     const allSports = getAvailableSports();
     const sportsData: AllSportsGameEventsResponse['sports'] = {};
-    const allEvents: GameEvent[] = [];
     let sportsProcessed = 0;
     let sportsSkipped = 0;
 
-    // Process each sport
-    for (const sport of allSports) {
+    // Process all sports in parallel with timeout
+    const sportPromises = allSports.map(async (sport) => {
       const config = allSportsConfig[sport];
       
       // Skip sports without series IDs
@@ -585,8 +644,7 @@ export class GameEventsService {
           message: 'Skipping sport - no series ID configured',
           sport,
         });
-        sportsSkipped++;
-        continue;
+        return { sport, skipped: true, error: 'No series ID' };
       }
 
       try {
@@ -596,78 +654,84 @@ export class GameEventsService {
           seriesId: config.seriesId,
         });
 
-        // Get series summary to find earliest_open_week
-        let seriesSummary;
-        try {
-          seriesSummary = await seriesSummaryService.getSeriesSummaryBySport(sport);
-        } catch (error) {
-          logger.error({
-            message: 'Failed to fetch series summary for sport',
-            sport,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          sportsSkipped++;
-          continue;
-        }
-
-        // Determine event week to use
-        let eventWeek: number;
-        if (seriesSummary.earliest_open_week !== undefined && seriesSummary.earliest_open_week !== null) {
-          eventWeek = seriesSummary.earliest_open_week;
-        } else if (seriesSummary.eventWeeks && seriesSummary.eventWeeks.length > 0) {
-          // Fallback to first available week if earliest_open_week is not set
-          eventWeek = seriesSummary.eventWeeks[0];
-          logger.warn({
-            message: 'earliest_open_week not found, using first available week',
-            sport,
-            eventWeek,
-          });
-        } else {
-          logger.warn({
-            message: 'No event weeks available for sport',
-            sport,
-            seriesId: config.seriesId,
-          });
-          sportsSkipped++;
-          continue;
-        }
-
-        // Fetch game events for this sport and week
-        let gameEventsResponse: GameEventsResponse;
-        try {
-          gameEventsResponse = await this.getGameEvents(sport, eventWeek);
-        } catch (error) {
-          logger.error({
-            message: 'Failed to fetch game events for sport',
-            sport,
-            eventWeek,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          sportsSkipped++;
-          continue;
-        }
-
-        // Store sport data
-        sportsData[sport] = {
-          sport,
-          seriesId: gameEventsResponse.seriesId,
-          eventWeek: gameEventsResponse.eventWeek,
-          eventCount: gameEventsResponse.events.length,
-          events: gameEventsResponse.events,
-        };
-
-        // Add events to flat array
-        allEvents.push(...gameEventsResponse.events);
-
-        sportsProcessed++;
-
-        logger.info({
-          message: 'Successfully processed sport',
-          sport,
-          seriesId: gameEventsResponse.seriesId,
-          eventWeek: gameEventsResponse.eventWeek,
-          eventCount: gameEventsResponse.events.length,
+        // Add timeout wrapper (30 seconds per sport)
+        const timeoutPromise = new Promise<{ sport: string; skipped: boolean; error: string }>((resolve) => {
+          setTimeout(() => {
+            resolve({ sport, skipped: true, error: 'Timeout after 30s' });
+          }, 30000);
         });
+
+        const processPromise = (async () => {
+          // Get series summary to find earliest_open_week
+          let seriesSummary;
+          try {
+            seriesSummary = await seriesSummaryService.getSeriesSummaryBySport(sport);
+          } catch (error) {
+            logger.error({
+              message: 'Failed to fetch series summary for sport',
+              sport,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return { sport, skipped: true, error: 'Series summary fetch failed' };
+          }
+
+          // Determine event week to use
+          let eventWeek: number;
+          if (seriesSummary.earliest_open_week !== undefined && seriesSummary.earliest_open_week !== null) {
+            eventWeek = seriesSummary.earliest_open_week;
+          } else if (seriesSummary.eventWeeks && seriesSummary.eventWeeks.length > 0) {
+            // Fallback to first available week if earliest_open_week is not set
+            eventWeek = seriesSummary.eventWeeks[0];
+            logger.warn({
+              message: 'earliest_open_week not found, using first available week',
+              sport,
+              eventWeek,
+            });
+          } else {
+            logger.warn({
+              message: 'No event weeks available for sport',
+              sport,
+              seriesId: config.seriesId,
+            });
+            return { sport, skipped: true, error: 'No event weeks' };
+          }
+
+          // Fetch game events for this sport and week
+          let gameEventsResponse: GameEventsResponse;
+          try {
+            gameEventsResponse = await this.getGameEvents(sport, eventWeek);
+          } catch (error) {
+            logger.error({
+              message: 'Failed to fetch game events for sport',
+              sport,
+              eventWeek,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return { sport, skipped: true, error: 'Game events fetch failed' };
+          }
+
+          logger.info({
+            message: 'Successfully processed sport',
+            sport,
+            seriesId: gameEventsResponse.seriesId,
+            eventWeek: gameEventsResponse.eventWeek,
+            eventCount: gameEventsResponse.events.length,
+          });
+
+          return {
+            sport,
+            skipped: false,
+            data: {
+              sport,
+              seriesId: gameEventsResponse.seriesId,
+              eventWeek: gameEventsResponse.eventWeek,
+              eventCount: gameEventsResponse.events.length,
+              events: gameEventsResponse.events,
+            },
+          };
+        })();
+
+        return Promise.race([processPromise, timeoutPromise]);
       } catch (error) {
         logger.error({
           message: 'Unexpected error processing sport',
@@ -675,7 +739,31 @@ export class GameEventsService {
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
+        return { sport, skipped: true, error: 'Unexpected error' };
+      }
+    });
+
+    // Wait for all sports to process (with individual timeouts)
+    const results = await Promise.allSettled(sportPromises);
+
+    // Process results
+    const allEvents: GameEvent[] = [];
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const sportResult = result.value;
+        if (sportResult.skipped) {
+          sportsSkipped++;
+        } else if ('data' in sportResult && sportResult.data) {
+          sportsData[sportResult.data.sport] = sportResult.data;
+          allEvents.push(...sportResult.data.events);
+          sportsProcessed++;
+        }
+      } else {
         sportsSkipped++;
+        logger.error({
+          message: 'Promise rejected for sport',
+          error: result.reason,
+        });
       }
     }
 
@@ -687,13 +775,25 @@ export class GameEventsService {
       sportsWithEvents: Object.keys(sportsData).length,
     });
 
-    return {
+    const result = {
       events: allEvents,
       sports: sportsData,
       totalEvents: allEvents.length,
       sportsProcessed,
       sportsSkipped,
     };
+
+    // Cache the result
+    try {
+      await setCache(cacheKey, JSON.stringify(result), GAME_EVENTS_CACHE_TTL);
+    } catch (error) {
+      logger.warn({
+        message: 'Cache write error for all sports',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return result;
   }
 }
 
