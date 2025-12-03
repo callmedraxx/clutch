@@ -189,6 +189,10 @@ export interface TransformedOutcome {
   conditionId?: string;
   groupItemThreshold?: string; // Threshold for group items
   isWinner?: boolean; // True if this outcome won (for resolved markets)
+  marketId?: string; // Market ID this outcome belongs to (for multi-market events like live games)
+  marketQuestion?: string; // Market question/type (e.g., "Moneyline", "Spread", "Totals") for identification
+  active?: boolean; // Market active status
+  closed?: boolean; // Market closed status
 }
 
 export interface TransformedMarket {
@@ -261,6 +265,9 @@ export interface TransformedEvent {
   updatedAt?: string;
   hasGroupItems?: boolean; // Indicates if event has group items
   groupedOutcomes?: TransformedOutcome[]; // Aggregated outcomes from group items or best market
+  // Outcome type identifiers (for frontend differentiation)
+  isBinaryOutcome?: boolean; // Computed: true if event has exactly 2 outcomes (typically Yes/No)
+  isMultiOutcome?: boolean; // Computed: true if event has more than 2 outcomes
   // Resolution fields (for resolved events)
   closedTime?: string;
   isResolved?: boolean; // Computed: true if event or all markets are resolved

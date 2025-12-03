@@ -149,6 +149,11 @@ export const runMigrations = async (): Promise<void> => {
       CREATE INDEX IF NOT EXISTS idx_live_games_game_id ON live_games(game_id)
     `);
     
+    // Create GIN index on transformed_data for efficient JSON queries (e.g., groupedOutcomes)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_live_games_transformed_data_gin ON live_games USING GIN (transformed_data)
+    `);
+    
     await client.query('COMMIT');
     logger.info('Migrations completed successfully');
   } catch (error) {

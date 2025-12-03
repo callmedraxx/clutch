@@ -120,6 +120,50 @@ function parseOutcomes(outcomes: string[] | undefined): string[] {
 }
 
 /**
+ * Normalize probabilities using Largest Remainder Method (Hare-Niemeyer)
+ * Ensures probabilities sum to exactly 100% while preserving relative proportions
+ * This matches Polymarket's frontend behavior (e.g., 50.5% and 49.5% → 51% and 49%)
+ */
+function normalizeProbabilities(probabilities: number[]): number[] {
+  if (probabilities.length === 0) {
+    return [];
+  }
+
+  // Step 1: Floor all values
+  const floored = probabilities.map(p => Math.floor(p));
+  const sum = floored.reduce((a, b) => a + b, 0);
+  const remainder = 100 - sum;
+
+  // If already sums to 100, return floored values
+  if (remainder === 0) {
+    return floored;
+  }
+
+  // Step 2: Calculate remainders for each probability
+  const remainders = probabilities.map((p, i) => ({
+    index: i,
+    remainder: p - floored[i],
+  }));
+
+  // Step 3: Sort by remainder (descending) to prioritize values with largest fractional parts
+  remainders.sort((a, b) => {
+    // If remainders are equal, prefer earlier index (deterministic tie-breaking)
+    if (Math.abs(a.remainder - b.remainder) < 0.0001) {
+      return a.index - b.index;
+    }
+    return b.remainder - a.remainder;
+  });
+
+  // Step 4: Distribute the missing percentage to values with largest remainders
+  const result = [...floored];
+  for (let i = 0; i < remainder; i++) {
+    result[remainders[i].index]++;
+  }
+
+  return result;
+}
+
+/**
  * Extract clobTokenIds from various formats
  */
 function extractClobTokenIds(clobTokenIds: string[] | string | undefined): string[] {
@@ -160,7 +204,49 @@ function createTransformedOutcomes(market: PolymarketMarket): TransformedOutcome
   const tokenIds = extractClobTokenIds(market.clobTokenIds);
 
   if (outcomeLabels.length === 0) {
+    // Log warning if we have outcomePrices but no outcomes, or vice versa
+    if (market.outcomePrices && (Array.isArray(market.outcomePrices) || typeof market.outcomePrices === 'string')) {
+      logger.debug({
+        message: 'Could not parse outcomes for structuredOutcomes',
+        marketId: market.id,
+        hasOutcomes: !!market.outcomes,
+        outcomesType: typeof market.outcomes,
+        hasOutcomePrices: !!market.outcomePrices,
+        outcomePricesType: typeof market.outcomePrices,
+      });
+    }
     return [];
+  }
+
+  // Ensure we have prices for each outcome label
+  if (prices.length === 0 && outcomeLabels.length > 0) {
+    logger.debug({
+      message: 'Could not parse outcomePrices for structuredOutcomes',
+      marketId: market.id,
+      outcomeCount: outcomeLabels.length,
+      hasOutcomePrices: !!market.outcomePrices,
+      outcomePricesType: typeof market.outcomePrices,
+    });
+    // If no prices, create outcomes with default prices (equal distribution)
+    const defaultPrice = 100 / outcomeLabels.length;
+    return outcomeLabels.map((label, index) => {
+      const marketVolume = typeof market.volume === 'string'
+        ? parseFloat(market.volume)
+        : (market.volumeNum || market.volume || 0);
+      
+      return {
+        label: label || 'Unknown',
+        shortLabel: (label || 'UNK').slice(0, 3).toUpperCase(),
+        price: defaultPrice.toFixed(2),
+        probability: Math.round(defaultPrice),
+        volume: Math.round(marketVolume / outcomeLabels.length),
+        icon: market.icon,
+        clobTokenId: tokenIds[index],
+        conditionId: market.conditionId,
+        active: market.active ?? false,
+        closed: market.closed ?? false,
+      };
+    });
   }
 
   const marketVolume = typeof market.volume === 'string'
@@ -197,9 +283,17 @@ function createTransformedOutcomes(market: PolymarketMarket): TransformedOutcome
     }
   }
 
-  return outcomeLabels.map((label, index) => {
+  // Calculate raw probabilities (clamped to 0-100)
+  const rawProbabilities = prices.map((rawPrice) => 
+    Math.max(0, Math.min(100, rawPrice))
+  );
+
+  // Normalize probabilities to ensure they sum to exactly 100%
+  const normalizedProbabilities = normalizeProbabilities(rawProbabilities);
+
+    return outcomeLabels.map((label, index) => {
     const rawPrice = prices[index] || 0;
-    const probability = Math.max(0, Math.min(100, Math.round(rawPrice)));
+    const probability = normalizedProbabilities[index] || 0;
     const priceInCents = rawPrice.toFixed(2);
     const isWinner = isResolved && index === winnerIndex;
 
@@ -213,6 +307,8 @@ function createTransformedOutcomes(market: PolymarketMarket): TransformedOutcome
       clobTokenId: tokenIds[index],
       conditionId: market.conditionId,
       isWinner: isWinner || undefined, // Only set if true
+      active: market.active ?? false,
+      closed: market.closed ?? false,
     };
   });
 }
@@ -230,15 +326,6 @@ function transformMarket(market: PolymarketMarket): TransformedMarket {
       ? parseFloat(market.liquidity)
       : (market.liquidityNum || market.liquidityClob || 0);
 
-    // Create structured outcomes
-    const structuredOutcomes = createTransformedOutcomes(market);
-
-    // Detect if this is a group item
-    const isGroupItem = !!market.groupItemTitle;
-
-    // Extract and store clobTokenIds
-    const clobTokenIds = extractClobTokenIds(market.clobTokenIds);
-
     // Parse raw outcomes and prices for backward compatibility
     let rawOutcomes: string[] | undefined;
     let rawOutcomePrices: string[] | undefined;
@@ -250,6 +337,45 @@ function transformMarket(market: PolymarketMarket): TransformedMarket {
       rawOutcomes = market.outcomes;
       rawOutcomePrices = market.outcomePrices;
     }
+
+    // Create structured outcomes from raw market
+    let structuredOutcomes = createTransformedOutcomes(market);
+
+    // If structuredOutcomes is empty but we have parsed outcomes/prices, try creating from parsed values
+    if (structuredOutcomes.length === 0 && rawOutcomes && rawOutcomes.length > 0 && rawOutcomePrices && rawOutcomePrices.length > 0) {
+      // Create a temporary market object with parsed outcomes/prices for structuredOutcomes creation
+      const marketWithParsedData: PolymarketMarket = {
+        ...market,
+        outcomes: rawOutcomes,
+        outcomePrices: rawOutcomePrices,
+      };
+      structuredOutcomes = createTransformedOutcomes(marketWithParsedData);
+      
+      // Log if we successfully created structuredOutcomes on second attempt
+      if (structuredOutcomes.length > 0) {
+        logger.debug({
+          message: 'Created structuredOutcomes from parsed outcomes/prices',
+          marketId: market.id,
+          outcomeCount: structuredOutcomes.length,
+        });
+      } else {
+        // Log warning if we still couldn't create structuredOutcomes despite having outcomes/prices
+        logger.warn({
+          message: 'Could not create structuredOutcomes even after parsing outcomes/prices',
+          marketId: market.id,
+          hasOutcomes: !!rawOutcomes && rawOutcomes.length > 0,
+          hasOutcomePrices: !!rawOutcomePrices && rawOutcomePrices.length > 0,
+          outcomeCount: rawOutcomes?.length || 0,
+          priceCount: rawOutcomePrices?.length || 0,
+        });
+      }
+    }
+
+    // Detect if this is a group item
+    const isGroupItem = !!market.groupItemTitle;
+
+    // Extract and store clobTokenIds
+    const clobTokenIds = extractClobTokenIds(market.clobTokenIds);
 
     return {
       id: market.id,
@@ -362,145 +488,268 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
     // Detect if event has group items
     const hasGroupItems = markets.some((m) => m.isGroupItem);
 
-    // Create groupedOutcomes based on whether we have group items
+    // Create groupedOutcomes - aggregate ALL markets for live games (both group items and non-group items)
     let groupedOutcomes: TransformedOutcome[] | undefined;
 
-    if (hasGroupItems) {
-      // Filter and sort group item markets by threshold
-      // Include closed markets for resolved events
-      const groupMarkets = markets
-        .filter((m) => m.isGroupItem && !m.archived && (m.active || m.closed))
-        .sort((a, b) => {
-          const aThreshold = parseFloat(a.groupItemThreshold || '0');
-          const bThreshold = parseFloat(b.groupItemThreshold || '0');
-          return aThreshold - bThreshold;
-        });
+    // Get all active markets (both group items and non-group items)
+    // Only include markets that are active AND not closed (active: true, closed: false)
+    const activeMarkets = markets.filter((m) => !m.archived && m.active === true && m.closed === false);
+    const hasMultipleMarkets = activeMarkets.length > 1;
 
-      if (groupMarkets.length > 0) {
-        // Aggregate outcomes from all group items
-        const aggregatedOutcomes: TransformedOutcome[] = [];
+    // For live games with multiple markets, aggregate ALL markets (not just group items)
+    // This ensures moneyline, spread, totals, etc. are all included in groupedOutcomes
+    // Also create groupedOutcomes if event has only one active market (for consistency)
+    if ((hasMultipleMarkets || activeMarkets.length === 1) && !event.closed) {
+      // Aggregate outcomes from ALL markets (both group items and non-group items)
+      // This ensures live games show moneyline, spread, totals, etc. all together
+      const aggregatedOutcomes: TransformedOutcome[] = [];
 
-        for (const groupMarket of groupMarkets) {
-          // For group items, each market represents one outcome
-          // Use structuredOutcomes if available (already has correct probabilities)
-          // Otherwise, parse outcomePrices directly
-          let outcome: TransformedOutcome;
-          
-          if (groupMarket.structuredOutcomes && groupMarket.structuredOutcomes.length > 0) {
+      for (const market of activeMarkets) {
+        let marketOutcomes: TransformedOutcome[] = [];
+
+        // For group items, each market typically represents one outcome
+        // For non-group items, each market has multiple outcomes
+        if (market.isGroupItem) {
+          // Group item: use structuredOutcomes if available, otherwise parse from outcomePrices
+          if (market.structuredOutcomes && market.structuredOutcomes.length > 0) {
             // Use the first structured outcome (group items typically have one outcome)
-            const structured = groupMarket.structuredOutcomes[0];
-            outcome = {
+            const structured = market.structuredOutcomes[0];
+            marketOutcomes = [{
               ...structured,
-              label: groupMarket.groupItemTitle || structured.label,
-              shortLabel: (groupMarket.groupItemTitle || structured.label).slice(0, 3).toUpperCase(),
-              volume: groupMarket.volume || structured.volume,
-              icon: groupMarket.icon || structured.icon,
-              groupItemThreshold: groupMarket.groupItemThreshold,
-              // Preserve isWinner flag if market is resolved
+              label: market.groupItemTitle || structured.label,
+              shortLabel: (market.groupItemTitle || structured.label).slice(0, 3).toUpperCase(),
+              volume: market.volume || structured.volume,
+              icon: market.icon || structured.icon,
+              groupItemThreshold: market.groupItemThreshold,
               isWinner: structured.isWinner,
-            };
+              marketId: market.id,
+              marketQuestion: market.question,
+              active: market.active ?? false,
+              closed: market.closed ?? false,
+            }];
           } else {
-            // Fallback: parse outcomePrices directly
-            const prices = parseOutcomePrices(groupMarket.outcomePrices);
+            // Fallback: parse outcomePrices directly for group items
+            const prices = parseOutcomePrices(market.outcomePrices);
             const yesPrice = prices[0] || 0;
-            const probability = Math.max(0, Math.min(100, Math.round(yesPrice)));
+            
+            // Normalize probabilities for this market (group items typically have 2 outcomes: Yes/No)
+            const rawProbabilities = prices.map((p) => Math.max(0, Math.min(100, p)));
+            const normalizedProbabilities = normalizeProbabilities(rawProbabilities);
+            const probability = normalizedProbabilities[0] || 0;
             
             // Detect if this group market is resolved and won
-            // yesPrice is already in percentage form (0-100) after parseOutcomePrices
-            // For group markets, check if yesPrice is the highest (>= 99 indicates winner)
-            const isResolved = groupMarket.closed === true;
+            const isResolved = market.closed === true;
             const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
             const isWinner = isResolved && yesPrice >= 99 && yesPrice === maxPrice;
             
             // Extract clobTokenId from stored clobTokenIds
-            const clobTokenId = groupMarket.clobTokenIds?.[0] || undefined;
+            const clobTokenId = market.clobTokenIds?.[0] || undefined;
 
-            outcome = {
-              label: groupMarket.groupItemTitle || groupMarket.question || 'Unknown',
-              shortLabel: (groupMarket.groupItemTitle || groupMarket.question || 'UNK').slice(0, 3).toUpperCase(),
+            marketOutcomes = [{
+              label: market.groupItemTitle || market.question || 'Unknown',
+              shortLabel: (market.groupItemTitle || market.question || 'UNK').slice(0, 3).toUpperCase(),
               price: yesPrice.toFixed(2),
               probability: probability,
-              volume: groupMarket.volume || 0,
-              icon: groupMarket.icon,
+              volume: market.volume || 0,
+              icon: market.icon,
               clobTokenId: clobTokenId,
-              conditionId: groupMarket.conditionId,
-              groupItemThreshold: groupMarket.groupItemThreshold,
-              isWinner: isWinner || undefined, // Only set if true
-            };
+              conditionId: market.conditionId,
+              groupItemThreshold: market.groupItemThreshold,
+              isWinner: isWinner || undefined,
+              marketId: market.id,
+              marketQuestion: market.question,
+              active: market.active ?? false,
+              closed: market.closed ?? false,
+            }];
           }
-
-          aggregatedOutcomes.push(outcome);
-        }
-
-        // Sort by probability descending
-        groupedOutcomes = aggregatedOutcomes.sort((a, b) => b.probability - a.probability);
-      }
-    } else {
-      // For non-group items, use the best market by liquidity (or volume)
-      // If the best market has no outcomes, try other markets as fallback
-      // Include closed markets for resolved events
-      const activeMarkets = markets.filter((m) => !m.archived && (m.active || m.closed));
-
-      if (activeMarkets.length > 0) {
-        // Sort markets by liquidity (then volume) to prioritize best markets
-        const sortedMarkets = [...activeMarkets].sort((a, b) => {
-          const aLiquidity = a.liquidity || 0;
-          const bLiquidity = b.liquidity || 0;
-          if (aLiquidity !== bLiquidity) {
-            return bLiquidity - aLiquidity;
-          }
-          return (b.volume || 0) - (a.volume || 0);
-        });
-
-        // Try markets in order until we find one with outcomes
-        for (const market of sortedMarkets) {
+        } else {
+          // Non-group item: use structuredOutcomes if available, otherwise parse from raw data
           if (market.structuredOutcomes && market.structuredOutcomes.length > 0) {
-            groupedOutcomes = [...market.structuredOutcomes].sort((a, b) => b.probability - a.probability);
-            break;
-          }
+            marketOutcomes = market.structuredOutcomes.map((outcome) => ({
+              ...outcome,
+              marketId: market.id,
+              marketQuestion: market.question,
+              active: market.active ?? false,
+              closed: market.closed ?? false,
+            }));
+          } else {
+              // Fallback: parse outcomes from raw market data
+              const outcomeLabels = parseOutcomes(market.outcomes);
+              const prices = parseOutcomePrices(market.outcomePrices);
+
+              if (outcomeLabels.length > 0 && prices.length > 0) {
+                const tokenIds = market.clobTokenIds || [];
+                const marketVolume = market.volume || 0;
+
+                // Calculate individual outcome volumes
+                const totalPrice = prices.reduce((sum, p) => sum + p, 0);
+                const volumePerOutcome = totalPrice > 0
+                  ? outcomeLabels.map((_, index) => {
+                      const priceRatio = prices[index] || 0;
+                      return (priceRatio / totalPrice) * marketVolume;
+                    })
+                  : outcomeLabels.map(() => marketVolume / outcomeLabels.length);
+
+                // Detect if market is resolved and find winner
+                const isResolved = market.closed === true;
+                let winnerIndex = -1;
+                if (isResolved && prices.length > 0) {
+                  let maxPrice = -1;
+                  prices.forEach((p, index) => {
+                    const priceNum = typeof p === 'string' ? parseFloat(p) : p;
+                    if (!isNaN(priceNum) && priceNum > maxPrice) {
+                      maxPrice = priceNum;
+                      winnerIndex = index;
+                    }
+                  });
+                  if (maxPrice < 99) {
+                    winnerIndex = -1;
+                  }
+                }
+
+                // Normalize probabilities for this market to ensure they sum to 100%
+                const rawProbabilities = prices.map((p) => Math.max(0, Math.min(100, p)));
+                const normalizedProbabilities = normalizeProbabilities(rawProbabilities);
+
+                marketOutcomes = outcomeLabels.map((label, index) => {
+                  const rawPrice = prices[index] || 0;
+                  const probability = normalizedProbabilities[index] || 0;
+                  const isWinner = isResolved && index === winnerIndex;
+
+                  return {
+                    label: label || 'Unknown',
+                    shortLabel: (label || 'UNK').slice(0, 3).toUpperCase(),
+                    price: rawPrice.toFixed(2),
+                    probability: probability,
+                    volume: Math.round(volumePerOutcome[index] || 0),
+                    icon: market.icon,
+                    clobTokenId: tokenIds[index],
+                    conditionId: market.conditionId,
+                    isWinner: isWinner || undefined,
+                    marketId: market.id,
+                    marketQuestion: market.question,
+                    active: market.active ?? false,
+                    closed: market.closed ?? false,
+                  };
+                });
+              }
+            }
         }
 
-        // If still no outcomes found, try to create outcomes from raw data as fallback
-        if (!groupedOutcomes || groupedOutcomes.length === 0) {
-          for (const market of sortedMarkets) {
-            // Try to parse outcomes directly from raw market data
-            const outcomeLabels = parseOutcomes(market.outcomes);
-            const prices = parseOutcomePrices(market.outcomePrices);
+        // Add all outcomes from this market to aggregated list
+        aggregatedOutcomes.push(...marketOutcomes);
+      }
+
+      // Sort all aggregated outcomes by probability descending
+      // Filter to ensure only outcomes from active, non-closed markets are included
+      if (aggregatedOutcomes.length > 0) {
+        const beforeFilter = aggregatedOutcomes.length;
+        groupedOutcomes = aggregatedOutcomes
+          .filter((outcome) => {
+            const isActive = outcome.active === true;
+            const isNotClosed = outcome.closed === false;
+            return isActive && isNotClosed;
+          })
+          .sort((a, b) => b.probability - a.probability);
+        
+        logger.info({
+          message: 'Aggregated outcomes from all markets',
+          eventId: event.id,
+          marketCount: activeMarkets.length,
+          outcomeCountBeforeFilter: beforeFilter,
+          outcomeCountAfterFilter: groupedOutcomes.length,
+        });
+        
+        // If all outcomes were filtered out, log a warning
+        if (groupedOutcomes.length === 0 && beforeFilter > 0) {
+          logger.warn({
+            message: 'All outcomes filtered out - all markets may be inactive or closed',
+            eventId: event.id,
+            marketCount: activeMarkets.length,
+            marketsActive: activeMarkets.map(m => ({ id: m.id, active: m.active, closed: m.closed })),
+          });
+        }
+      } else {
+        logger.warn({
+          message: 'No aggregated outcomes created',
+          eventId: event.id,
+          marketCount: activeMarkets.length,
+        });
+      }
+    } else if (activeMarkets.length > 0) {
+      // Single market or closed event: use the best market by liquidity (or volume)
+      const sortedMarkets = [...activeMarkets].sort((a, b) => {
+        const aLiquidity = a.liquidity || 0;
+        const bLiquidity = b.liquidity || 0;
+        if (aLiquidity !== bLiquidity) {
+          return bLiquidity - aLiquidity;
+        }
+        return (b.volume || 0) - (a.volume || 0);
+      });
+
+      // Try markets in order until we find one with outcomes
+      for (const market of sortedMarkets) {
+        if (market.structuredOutcomes && market.structuredOutcomes.length > 0) {
+          groupedOutcomes = market.structuredOutcomes
+            .map((outcome) => ({
+              ...outcome,
+              marketId: market.id,
+              marketQuestion: market.question,
+              active: market.active ?? false,
+              closed: market.closed ?? false,
+            }))
+            .filter((outcome) => outcome.active === true && outcome.closed === false)
+            .sort((a, b) => b.probability - a.probability);
+          break;
+        }
+      }
+
+      // If still no outcomes found, try to create outcomes from raw data as fallback
+      if (!groupedOutcomes || groupedOutcomes.length === 0) {
+        for (const market of sortedMarkets) {
+              // Try to parse outcomes directly from raw market data
+              const outcomeLabels = parseOutcomes(market.outcomes);
+              const prices = parseOutcomePrices(market.outcomePrices);
+              
+          if (outcomeLabels.length > 0 && prices.length > 0) {
+            const tokenIds = market.clobTokenIds || [];
+            const marketVolume = market.volume || 0;
             
-            if (outcomeLabels.length > 0 && prices.length > 0) {
-              const tokenIds = market.clobTokenIds || [];
-              const marketVolume = market.volume || 0;
-              
-              // Calculate individual outcome volumes (distribute market volume proportionally)
-              const totalPrice = prices.reduce((sum, p) => sum + p, 0);
-              const volumePerOutcome = totalPrice > 0
-                ? outcomeLabels.map((_, index) => {
-                    const priceRatio = prices[index] || 0;
-                    return (priceRatio / totalPrice) * marketVolume;
-                  })
-                : outcomeLabels.map(() => marketVolume / outcomeLabels.length);
-              
-              // Detect if market is resolved and find winner
-              const isResolved = market.closed === true;
-              let winnerIndex = -1;
-              if (isResolved && prices.length > 0) {
-                let maxPrice = -1;
-                prices.forEach((p, index) => {
-                  const priceNum = typeof p === 'string' ? parseFloat(p) : p;
-                  if (!isNaN(priceNum) && priceNum > maxPrice) {
-                    maxPrice = priceNum;
-                    winnerIndex = index;
-                  }
-                });
-                // Only consider it a winner if price is >= 99 (very high confidence)
-                if (maxPrice < 99) {
-                  winnerIndex = -1; // No clear winner if max price is too low
+            // Calculate individual outcome volumes (distribute market volume proportionally)
+            const totalPrice = prices.reduce((sum, p) => sum + p, 0);
+            const volumePerOutcome = totalPrice > 0
+              ? outcomeLabels.map((_, index) => {
+                  const priceRatio = prices[index] || 0;
+                  return (priceRatio / totalPrice) * marketVolume;
+                })
+              : outcomeLabels.map(() => marketVolume / outcomeLabels.length);
+            
+            // Detect if market is resolved and find winner
+            const isResolved = market.closed === true;
+            let winnerIndex = -1;
+            if (isResolved && prices.length > 0) {
+              let maxPrice = -1;
+              prices.forEach((p, index) => {
+                const priceNum = typeof p === 'string' ? parseFloat(p) : p;
+                if (!isNaN(priceNum) && priceNum > maxPrice) {
+                  maxPrice = priceNum;
+                  winnerIndex = index;
                 }
+              });
+              // Only consider it a winner if price is >= 99 (very high confidence)
+              if (maxPrice < 99) {
+                winnerIndex = -1; // No clear winner if max price is too low
               }
-              
-              groupedOutcomes = outcomeLabels.map((label, index) => {
+            }
+            
+            // Normalize probabilities for this market to ensure they sum to 100%
+            const rawProbabilities = prices.map((p) => Math.max(0, Math.min(100, p)));
+            const normalizedProbabilities = normalizeProbabilities(rawProbabilities);
+            
+            groupedOutcomes = outcomeLabels
+              .map((label, index) => {
                 const rawPrice = prices[index] || 0;
-                const probability = Math.max(0, Math.min(100, Math.round(rawPrice)));
+                const probability = normalizedProbabilities[index] || 0;
                 const isWinner = isResolved && index === winnerIndex;
                 
                 return {
@@ -513,18 +762,23 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
                   clobTokenId: tokenIds[index],
                   conditionId: market.conditionId,
                   isWinner: isWinner || undefined, // Only set if true
-                };
-              }).sort((a, b) => b.probability - a.probability);
-              
-              if (groupedOutcomes.length > 0) {
-                logger.info({
-                  message: 'Created fallback outcomes from raw market data',
-                  eventId: event.id,
                   marketId: market.id,
-                  outcomeCount: groupedOutcomes.length,
-                });
-                break;
-              }
+                  marketQuestion: market.question,
+                  active: market.active ?? false,
+                  closed: market.closed ?? false,
+                };
+              })
+              .filter((outcome) => outcome.active === true && outcome.closed === false)
+              .sort((a, b) => b.probability - a.probability);
+            
+            if (groupedOutcomes.length > 0) {
+              logger.info({
+                message: 'Created fallback outcomes from raw market data',
+                eventId: event.id,
+                marketId: market.id,
+                outcomeCount: groupedOutcomes.length,
+              });
+              break;
             }
           }
         }
@@ -552,6 +806,39 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
       }
       // For non-binary single markets or grouped events, or if no winner detected, keep all outcomes
     }
+
+    // Final safety filter: ensure only outcomes from active, non-closed markets are included
+    if (groupedOutcomes && groupedOutcomes.length > 0) {
+      const beforeFinalFilter = groupedOutcomes.length;
+      groupedOutcomes = groupedOutcomes.filter(
+        (outcome) => outcome.active === true && outcome.closed === false
+      );
+      
+      if (groupedOutcomes.length === 0 && beforeFinalFilter > 0) {
+        logger.warn({
+          message: 'Final filter removed all outcomes',
+          eventId: event.id,
+          beforeFilter: beforeFinalFilter,
+        });
+      }
+    }
+    
+    // Ensure groupedOutcomes is set (even if empty) for events with active markets
+    // This helps with debugging and ensures the field is always present
+    if (!groupedOutcomes && activeMarkets.length > 0 && !event.closed) {
+      logger.warn({
+        message: 'groupedOutcomes not created despite having active markets',
+        eventId: event.id,
+        activeMarketCount: activeMarkets.length,
+        eventClosed: event.closed,
+      });
+    }
+
+    // Calculate outcome type identifiers for frontend differentiation
+    // Note: Calculate after filtering so we use the final outcome count
+    const outcomeCount = groupedOutcomes?.length || 0;
+    const isBinaryOutcome = outcomeCount === 2;
+    const isMultiOutcome = outcomeCount > 2;
 
     return {
       id: event.id,
@@ -582,6 +869,9 @@ function transformEvent(event: PolymarketEvent): TransformedEvent {
       updatedAt: event.updatedAt,
       hasGroupItems: hasGroupItems,
       groupedOutcomes: groupedOutcomes,
+      // Outcome type identifiers
+      isBinaryOutcome: isBinaryOutcome || undefined, // Only set if true
+      isMultiOutcome: isMultiOutcome || undefined, // Only set if true
       // Resolution fields
       closedTime: markets.find((m) => m.closedTime)?.closedTime,
       isResolved: isResolved,
@@ -751,6 +1041,9 @@ export function mergePollingData(
       // Update computed fields from polling data (which has latest market data)
       existingEvent.hasGroupItems = pollingEvent.hasGroupItems ?? existingEvent.hasGroupItems;
       existingEvent.groupedOutcomes = pollingEvent.groupedOutcomes || existingEvent.groupedOutcomes;
+      // Update outcome type identifiers from polling data
+      existingEvent.isBinaryOutcome = pollingEvent.isBinaryOutcome ?? existingEvent.isBinaryOutcome;
+      existingEvent.isMultiOutcome = pollingEvent.isMultiOutcome ?? existingEvent.isMultiOutcome;
     } else {
       // New event from polling, add it
       eventMap.set(pollingEvent.id, { ...pollingEvent });

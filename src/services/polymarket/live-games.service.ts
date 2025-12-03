@@ -239,14 +239,71 @@ function extractSportFromGame(game: LiveGameEvent): string | null {
 }
 
 /**
- * Check if a game belongs to a configured sport/league
+ * Standard leagues that are allowed
+ * These are the official league identifiers we want to keep
+ */
+const STANDARD_LEAGUES = new Set([
+  'nfl',
+  'nba',
+  'mlb',
+  'nhl',
+  'ufc',
+  'epl',
+  'lal',
+]);
+
+/**
+ * Extract league identifier from game slug
+ * Returns the league part of the slug (e.g., "nhl" from "nhl-team1-team2" or "snhl" from "snhl-team1-team2")
+ */
+function extractLeagueFromSlug(slug: string): string | null {
+  if (!slug) return null;
+  
+  // Slug format is typically: "{league}-{team1}-{team2}-{date}"
+  // Extract the first part before the first hyphen
+  const parts = slug.toLowerCase().split('-');
+  if (parts.length > 0) {
+    return parts[0];
+  }
+  
+  return null;
+}
+
+/**
+ * Check if a league is a standard/approved league
+ */
+function isStandardLeague(league: string | null): boolean {
+  if (!league) return false;
+  return STANDARD_LEAGUES.has(league.toLowerCase());
+}
+
+/**
+ * Check if a game belongs to a configured sport/league and has a standard league
  */
 function isGameInConfiguredSport(game: LiveGameEvent): boolean {
   const sport = extractSportFromGame(game);
   if (!sport) return false;
   
   const seriesId = getSeriesIdForSport(sport);
-  return seriesId !== null && seriesId !== '';
+  if (seriesId === null || seriesId === '') {
+    return false;
+  }
+  
+  // Extract league from slug and verify it's a standard league
+  // This filters out non-standard leagues like "snhl" even if they match "nhl" in sport extraction
+  const league = extractLeagueFromSlug(game.slug);
+  if (!isStandardLeague(league)) {
+    logger.debug({
+      message: 'Filtering out game with non-standard league',
+      gameId: game.id,
+      slug: game.slug,
+      extractedLeague: league,
+      extractedSport: sport,
+    });
+    return false;
+  }
+  
+  return true;
 }
 
 /**
@@ -513,35 +570,46 @@ async function transformAndEnrichGames(
     eventsBySport.get(sport)!.push({ transformed: transformedEvent, raw: rawEvent });
   }
   
-  // Enrich all events for each sport in parallel
-  const enrichmentPromises = Array.from(eventsBySport.entries()).map(async ([sport, eventPairs]) => {
-    const transformedEventsForSport = eventPairs.map(p => p.transformed);
-    const rawEventsForSport = eventPairs.map(p => p.raw);
-    
-    // Batch enrich all events for this sport
-    const enriched = await enrichEventsWithTeams(transformedEventsForSport, sport);
-    
-    // Map enriched events back to their raw data
-    return enriched.map((enrichedGame, index) => {
-      const rawEvent = rawEventsForSport[index];
+    // Enrich all events for each sport in parallel
+    const enrichmentPromises = Array.from(eventsBySport.entries()).map(async ([sport, eventPairs]) => {
+      const transformedEventsForSport = eventPairs.map(p => p.transformed);
+      const rawEventsForSport = eventPairs.map(p => p.raw);
       
-      // Add live game specific fields from raw event
-      enrichedGame.sport = sport;
-      enrichedGame.league = sport;
-      enrichedGame.seriesId = getSeriesIdForSport(sport) || undefined;
-      enrichedGame.gameId = rawEvent.gameId;
-      enrichedGame.score = rawEvent.score;
-      enrichedGame.period = rawEvent.period;
-      enrichedGame.elapsed = rawEvent.elapsed;
-      enrichedGame.live = rawEvent.live;
-      enrichedGame.ended = rawEvent.ended;
-      // Preserve ticker from raw event (required for database) - ensure it's never null/undefined
-      enrichedGame.ticker = rawEvent.ticker || rawEvent.slug || rawEvent.id || 'UNKNOWN';
-      enrichedGame.rawData = rawEvent;
+      // Batch enrich all events for this sport
+      const enriched = await enrichEventsWithTeams(transformedEventsForSport, sport);
       
-      return enrichedGame;
+      // Map enriched events back to their raw data
+      return enriched.map((enrichedGame, index) => {
+        const rawEvent = rawEventsForSport[index];
+        
+        // Add live game specific fields from raw event
+        enrichedGame.sport = sport;
+        enrichedGame.league = sport;
+        enrichedGame.seriesId = getSeriesIdForSport(sport) || undefined;
+        enrichedGame.gameId = rawEvent.gameId;
+        enrichedGame.score = rawEvent.score;
+        enrichedGame.period = rawEvent.period;
+        enrichedGame.elapsed = rawEvent.elapsed;
+        enrichedGame.live = rawEvent.live;
+        enrichedGame.ended = rawEvent.ended;
+        // Preserve ticker from raw event (required for database) - ensure it's never null/undefined
+        enrichedGame.ticker = rawEvent.ticker || rawEvent.slug || rawEvent.id || 'UNKNOWN';
+        enrichedGame.rawData = rawEvent;
+        
+        // Log if groupedOutcomes is missing (for debugging)
+        if (!enrichedGame.groupedOutcomes || enrichedGame.groupedOutcomes.length === 0) {
+          logger.warn({
+            message: 'Live game missing groupedOutcomes after transformation',
+            gameId: enrichedGame.id,
+            title: enrichedGame.title,
+            marketCount: enrichedGame.markets?.length || 0,
+            hasGroupItems: enrichedGame.hasGroupItems,
+          });
+        }
+        
+        return enrichedGame;
+      });
     });
-  });
   
   // Wait for all sport enrichments to complete
   const enrichedBySport = await Promise.all(enrichmentPromises);
