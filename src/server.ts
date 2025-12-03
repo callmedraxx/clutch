@@ -144,6 +144,14 @@ const gracefulShutdown = async (signal: string) => {
       logger.error('Error stopping live games service');
     });
 
+    // Stop sports websocket service
+    import('./services/polymarket/sports-websocket.service').then(({ sportsWebSocketService }) => {
+      sportsWebSocketService.disconnect();
+      logger.info('Sports WebSocket service stopped');
+    }).catch(() => {
+      logger.error('Error stopping sports WebSocket service');
+    });
+
     // Polling service is disabled, no need to stop
   });
 };
@@ -165,6 +173,17 @@ const server = app.listen(PORT, async () => {
     logger.error('Failed to initialize connections:', error);
   }
 
+  // Run database migrations
+  try {
+    const { runMigrations } = await import('./database/migrate');
+    await runMigrations();
+    logger.info('Database migrations completed successfully');
+  } catch (error) {
+    logger.error('Failed to run database migrations:', error);
+    // Don't exit - allow server to start even if migrations fail
+    // This allows manual migration fixes
+  }
+
   // Background polling service disabled - using on-demand fetching with cache instead
   // This reduces API calls and prevents rate limiting
   // Data is fetched only when frontend requests it and cache is expired
@@ -182,15 +201,26 @@ const server = app.listen(PORT, async () => {
   // Start live games service
   try {
     const { liveGamesService } = await import('./services/polymarket/live-games.service');
-    const { broadcastGameUpdate } = await import('./routes/polymarket');
+    const { broadcastGameUpdate, broadcastGamePartialUpdate } = await import('./routes/polymarket');
     
-    // Set up SSE broadcast callback
+    // Set up SSE broadcast callbacks
     liveGamesService.setSSEBroadcastCallback(broadcastGameUpdate);
+    liveGamesService.setSSEPartialBroadcastCallback(broadcastGamePartialUpdate);
     
     liveGamesService.start();
     logger.info('Live games service started');
   } catch (error) {
     logger.error('Failed to start live games service:', error);
+  }
+
+  // Start sports websocket service for real-time game updates
+  try {
+    const { sportsWebSocketService } = await import('./services/polymarket/sports-websocket.service');
+    await sportsWebSocketService.connect();
+    logger.info('Sports WebSocket service started and connected');
+  } catch (error) {
+    logger.error('Failed to start sports WebSocket service:', error);
+    // Don't exit - continue without websocket updates
   }
 });
 

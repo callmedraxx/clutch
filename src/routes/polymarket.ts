@@ -2726,6 +2726,32 @@ router.get(
 );
 
 /**
+ * Handle OPTIONS preflight for SSE endpoint
+ */
+router.options('/live-games/sse', (req: Request, res: Response) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    const allowedOrigins = process.env.CORS_ORIGIN 
+      ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+      : [];
+    
+    if (allowedOrigins.length === 0 || 
+        allowedOrigins.includes('*') || 
+        allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  res.status(204).end();
+});
+
+/**
  * @swagger
  * /api/polymarket/live-games/sse:
  *   get:
@@ -2751,18 +2777,39 @@ router.get(
  */
 router.get(
   '/live-games/sse',
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response) => {
+    // Set CORS headers FIRST, before any async operations
+    const origin = req.headers.origin;
+    if (origin) {
+      // Get allowed origins from environment variable
+      const allowedOrigins = process.env.CORS_ORIGIN 
+        ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+        : [];
+      
+      // Allow if no CORS_ORIGIN set, or if origin is in allowed list, or if '*' is in list
+      if (allowedOrigins.length === 0 || 
+          allowedOrigins.includes('*') || 
+          allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
+    } else {
+      // No origin header, allow all (for non-browser clients)
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+    
     try {
       logger.info({
         message: 'SSE connection request received',
         ip: req.ip,
+        origin: req.headers.origin,
       });
-
-      // Set SSE headers
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
       // Add client to set
       sseClients.add(res);
@@ -2824,8 +2871,29 @@ router.get(
         stack: error instanceof Error ? error.stack : undefined,
       });
 
+      // Ensure CORS headers are set even on error
+      const origin = req.headers.origin;
+      if (origin && !res.headersSent) {
+        const allowedOrigins = process.env.CORS_ORIGIN 
+          ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+          : [];
+        
+        if (allowedOrigins.length === 0 || 
+            allowedOrigins.includes('*') || 
+            allowedOrigins.includes(origin)) {
+          res.setHeader('Access-Control-Allow-Origin', origin);
+          res.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+      }
+
       if (!res.headersSent) {
-        next(error);
+        res.status(500).json({
+          success: false,
+          error: {
+            code: 'SSE_ERROR',
+            message: 'Failed to establish SSE connection',
+          },
+        });
       }
     }
   }
@@ -2981,6 +3049,7 @@ router.get(
 
 /**
  * Broadcast game updates to all SSE clients
+ * Supports both full updates (all games) and partial updates (single game)
  */
 export function broadcastGameUpdate(games: any[]): void {
   const message = `event: update\n`;
@@ -3010,6 +3079,42 @@ export function broadcastGameUpdate(games: any[]): void {
       message: 'Game update broadcasted to SSE clients',
       clientCount: sseClients.size,
       gameCount: games.length,
+    });
+  }
+}
+
+/**
+ * Broadcast a single game update to all SSE clients (partial update)
+ * Much faster than broadcasting all games - only sends the updated game
+ */
+export function broadcastGamePartialUpdate(game: any): void {
+  const message = `event: update\n`;
+  const data = `data: ${JSON.stringify({ type: 'game', game })}\n\n`;
+  
+  const disconnectedClients: Response[] = [];
+  
+  for (const client of sseClients) {
+    try {
+      client.write(message + data);
+    } catch (error) {
+      disconnectedClients.push(client);
+      logger.warn({
+        message: 'Error broadcasting partial game update to SSE client, removing',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  
+  // Remove disconnected clients
+  for (const client of disconnectedClients) {
+    sseClients.delete(client);
+  }
+  
+  if (sseClients.size > 0) {
+    logger.debug({
+      message: 'Partial game update broadcasted to SSE clients',
+      clientCount: sseClients.size,
+      gameId: game.id,
     });
   }
 }

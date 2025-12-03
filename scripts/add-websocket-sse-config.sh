@@ -56,7 +56,7 @@ awk '
         print "    }"
         print ""
         print "    # SSE (Server-Sent Events) support"
-        print "    location ~ ^/(events|sse|stream) {"
+        print "    location ~ ^/(api/polymarket/live-games/sse|events|sse|stream) {"
         print "        proxy_pass http://localhost:3000;"
         print "        proxy_http_version 1.1;"
         print "        proxy_buffering off;"

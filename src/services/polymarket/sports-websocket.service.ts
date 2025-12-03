@@ -24,6 +24,9 @@ export class SportsWebSocketService {
   private messageHistory: SportsWebSocketMessage[] = [];
   private gameUpdates: Map<number, SportsGameUpdate> = new Map(); // gameId -> latest update
   private maxHistorySize: number = 100;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private maxReconnectAttempts: number = 10;
+  private reconnectDelay: number = 5000; // 5 seconds
 
   /**
    * Connect to the Sports WebSocket endpoint
@@ -122,6 +125,16 @@ export class SportsWebSocketService {
         codeMeaning: this.getCloseCodeMeaning(code),
         reconnectAttempts: this.reconnectAttempts,
       });
+
+      // Don't reconnect if it was a normal closure (1000) or if we've exceeded max attempts
+      if (code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.scheduleReconnect();
+      } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        logger.error({
+          message: 'Sports WebSocket max reconnection attempts reached',
+          maxAttempts: this.maxReconnectAttempts,
+        });
+      }
     });
 
     this.ws.on('ping', (data: Buffer) => {
@@ -337,9 +350,48 @@ export class SportsWebSocketService {
   }
 
   /**
+   * Schedule reconnection attempt
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimeout) {
+      return; // Already scheduled
+    }
+
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 5); // Exponential backoff, max 5x
+
+    logger.info({
+      message: 'Scheduling Sports WebSocket reconnection',
+      attempt: this.reconnectAttempts,
+      delayMs: delay,
+      maxAttempts: this.maxReconnectAttempts,
+    });
+
+    this.reconnectTimeout = setTimeout(async () => {
+      this.reconnectTimeout = null;
+      try {
+        await this.connect();
+      } catch (error) {
+        logger.error({
+          message: 'Error during Sports WebSocket reconnection',
+          error: error instanceof Error ? error.message : String(error),
+          attempt: this.reconnectAttempts,
+        });
+        // Will be scheduled again if connection fails
+      }
+    }, delay);
+  }
+
+  /**
    * Disconnect from WebSocket
    */
   disconnect(): void {
+    // Clear any pending reconnection
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
     if (this.ws) {
       logger.info({
         message: 'Disconnecting from Sports WebSocket',
@@ -349,6 +401,7 @@ export class SportsWebSocketService {
     }
     this.isConnected = false;
     this.isConnecting = false;
+    this.reconnectAttempts = 0;
   }
 
   /**

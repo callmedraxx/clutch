@@ -3,7 +3,7 @@
  * Fetches live games from Polymarket and filters by configured sports/leagues
  */
 
-import axios from 'axios';
+import axios, { AxiosResponse } from 'axios';
 import { logger } from '../../config/logger';
 import { pool } from '../../config/database';
 import { getSeriesIdForSport, getAllSportsGamesConfig } from './sports-games.config';
@@ -13,11 +13,100 @@ import { transformEvents } from './polymarket.transformer';
 import { PolymarketEvent, TransformedEvent } from './polymarket.types';
 
 // Build ID may change - we'll need to fetch it dynamically or update periodically
-const POLYMARKET_LIVE_ENDPOINT = 'https://polymarket.com/_next/data/6w0cVAj-lCsqW5cBTIuDH/sports/live.json?slug=live';
+// Default build ID - will be updated when 404 is encountered
+let currentBuildId = '6w0cVAj-lCsqW5cBTIuDH';
+
+/**
+ * Get the live endpoint URL with current build ID
+ */
+function getLiveEndpoint(): string {
+  return `https://polymarket.com/_next/data/${currentBuildId}/sports/live.json?slug=live`;
+}
+
 const POLLING_INTERVAL = 20 * 60 * 1000; // 20 minutes in milliseconds
+
+/**
+ * Fast extraction of buildId from HTML response
+ * Looks for "buildId":"..." pattern in script tags
+ * Exported for testing purposes
+ */
+export function extractBuildIdFromHtml(html: string): string | null {
+  // Fast regex to find buildId in script tags
+  // Pattern: "buildId":"<value>"
+  const buildIdRegex = /"buildId"\s*:\s*"([^"]+)"/;
+  const match = html.match(buildIdRegex);
+  
+  if (match && match[1]) {
+    return match[1];
+  }
+  
+  return null;
+}
+
+/**
+ * Fetch and extract buildId from polymarket.com root page
+ * This is called when we get a 404 to update the build ID
+ */
+async function fetchAndUpdateBuildId(): Promise<boolean> {
+  try {
+    logger.info({
+      message: 'Fetching build ID from polymarket.com root page',
+    });
+
+    const response = await axios.get<string>('https://polymarket.com', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-User': '?1',
+        'Sec-Fetch-Dest': 'document',
+      },
+      timeout: 30000,
+      maxContentLength: 10 * 1024 * 1024, // 10MB max
+      responseType: 'text',
+    });
+
+    const buildId = extractBuildIdFromHtml(response.data);
+    
+    if (buildId) {
+      const oldBuildId = currentBuildId;
+      currentBuildId = buildId;
+      
+      logger.info({
+        message: 'Build ID updated successfully',
+        oldBuildId,
+        newBuildId: buildId,
+        endpoint: getLiveEndpoint(),
+      });
+      
+      return true;
+    } else {
+      logger.warn({
+        message: 'Could not extract build ID from HTML response',
+        htmlLength: response.data.length,
+      });
+      return false;
+    }
+  } catch (error) {
+    logger.error({
+      message: 'Error fetching build ID from polymarket.com',
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
 
 // In-memory storage for development
 const inMemoryGames: Map<string, LiveGame> = new Map();
+
+// In-memory cache for production (to avoid fetching all games on every update)
+// Maps eventId -> LiveGame
+const gamesCache: Map<string, LiveGame> = new Map();
 
 export interface LiveGameEvent {
   id: string;
@@ -166,7 +255,7 @@ function isGameInConfiguredSport(game: LiveGameEvent): boolean {
 function convertToPolymarketEvent(event: LiveGameEvent): PolymarketEvent {
   return {
     id: event.id,
-    ticker: event.ticker,
+    ticker: event.ticker || event.slug || event.id, // Fallback to slug or id if ticker is missing
     slug: event.slug,
     title: event.title,
     description: event.description,
@@ -427,13 +516,14 @@ async function transformAndEnrichGames(
   // Enrich all events for each sport in parallel
   const enrichmentPromises = Array.from(eventsBySport.entries()).map(async ([sport, eventPairs]) => {
     const transformedEventsForSport = eventPairs.map(p => p.transformed);
+    const rawEventsForSport = eventPairs.map(p => p.raw);
     
     // Batch enrich all events for this sport
     const enriched = await enrichEventsWithTeams(transformedEventsForSport, sport);
     
     // Map enriched events back to their raw data
     return enriched.map((enrichedGame, index) => {
-      const rawEvent = eventPairs[index].raw;
+      const rawEvent = rawEventsForSport[index];
       
       // Add live game specific fields from raw event
       enrichedGame.sport = sport;
@@ -445,6 +535,8 @@ async function transformAndEnrichGames(
       enrichedGame.elapsed = rawEvent.elapsed;
       enrichedGame.live = rawEvent.live;
       enrichedGame.ended = rawEvent.ended;
+      // Preserve ticker from raw event (required for database) - ensure it's never null/undefined
+      enrichedGame.ticker = rawEvent.ticker || rawEvent.slug || rawEvent.id || 'UNKNOWN';
       enrichedGame.rawData = rawEvent;
       
       return enrichedGame;
@@ -461,15 +553,18 @@ async function transformAndEnrichGames(
 /**
  * Fetch live games from Polymarket endpoint
  * Returns empty array on error to prevent service disruption
+ * Automatically updates build ID on 404 errors
  */
 export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
+  const endpoint = getLiveEndpoint();
+  
   try {
     logger.info({
       message: 'Fetching live games from Polymarket',
-      endpoint: POLYMARKET_LIVE_ENDPOINT,
+      endpoint,
     });
 
-    const response = await axios.get<LiveGamesApiResponse>(POLYMARKET_LIVE_ENDPOINT, {
+    const response = await axios.get<LiveGamesApiResponse>(endpoint, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
         'Accept': 'application/json',
@@ -478,55 +573,122 @@ export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
       validateStatus: (status) => status < 500, // Don't throw on 4xx errors
     });
 
-    // Check for 404 or other client errors
+    // Check for 404 - build ID may be outdated, try to refresh it
     if (response.status === 404) {
       logger.warn({
-        message: 'Live games endpoint returned 404 - build ID may be outdated',
-        endpoint: POLYMARKET_LIVE_ENDPOINT,
-        suggestion: 'The Next.js build ID in the endpoint URL may need to be updated',
+        message: 'Live games endpoint returned 404 - attempting to refresh build ID',
+        endpoint,
       });
-      return [];
+      
+      // Try to fetch and update build ID
+      const buildIdUpdated = await fetchAndUpdateBuildId();
+      
+      if (buildIdUpdated) {
+        // Retry with new build ID
+        const newEndpoint = getLiveEndpoint();
+        logger.info({
+          message: 'Retrying live games fetch with updated build ID',
+          newEndpoint,
+        });
+        
+        const retryResponse = await axios.get<LiveGamesApiResponse>(newEndpoint, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+          },
+          timeout: 30000,
+          validateStatus: (status) => status < 500,
+        });
+        
+        if (retryResponse.status === 404) {
+          logger.warn({
+            message: 'Live games endpoint still returned 404 after build ID update',
+            endpoint: newEndpoint,
+          });
+          return [];
+        }
+        
+        if (retryResponse.status >= 400) {
+          logger.warn({
+            message: 'Live games endpoint returned error status after retry',
+            status: retryResponse.status,
+            endpoint: newEndpoint,
+          });
+          return [];
+        }
+        
+        // Success with retry - continue processing with retryResponse
+        return processLiveGamesResponse(retryResponse);
+      } else {
+        logger.warn({
+          message: 'Could not update build ID, returning empty array',
+          endpoint,
+        });
+        return [];
+      }
     }
 
     if (response.status >= 400) {
       logger.warn({
         message: 'Live games endpoint returned error status',
         status: response.status,
-        endpoint: POLYMARKET_LIVE_ENDPOINT,
+        endpoint,
       });
       return [];
     }
 
-    // Extract events from the response
-    const queries = response.data?.pageProps?.dehydratedState?.queries || [];
-    let events: Record<string, LiveGameEvent> = {};
-    
-    for (const query of queries) {
-      const data = query.state?.data;
-      if (data && typeof data === 'object' && 'events' in data) {
-        events = { ...events, ...(data.events || {}) };
-      }
-    }
+    return processLiveGamesResponse(response);
 
-    const eventArray = Object.values(events);
-    
-    logger.info({
-      message: 'Live games fetched successfully',
-      totalGames: eventArray.length,
-    });
-
-    return eventArray;
   } catch (error) {
     // Log error but return empty array instead of throwing
     // This prevents the service from crashing and allows it to continue with cached data
     const isAxiosError = error && typeof error === 'object' && 'response' in error;
     const status = isAxiosError && (error as any).response?.status;
     
+    // If it's a 404, try to refresh build ID
+    if (status === 404) {
+      logger.warn({
+        message: '404 error caught in exception handler - attempting to refresh build ID',
+        endpoint,
+      });
+      
+      const buildIdUpdated = await fetchAndUpdateBuildId();
+      
+      if (buildIdUpdated) {
+        // Retry once with new build ID
+        try {
+          const newEndpoint = getLiveEndpoint();
+          logger.info({
+            message: 'Retrying live games fetch with updated build ID (from exception handler)',
+            newEndpoint,
+          });
+          
+          const retryResponse = await axios.get<LiveGamesApiResponse>(newEndpoint, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+              'Accept': 'application/json',
+            },
+            timeout: 30000,
+            validateStatus: (status) => status < 500,
+          });
+          
+          if (retryResponse.status < 400) {
+            return processLiveGamesResponse(retryResponse);
+          }
+        } catch (retryError) {
+          logger.error({
+            message: 'Error in retry after build ID update',
+            error: retryError instanceof Error ? retryError.message : String(retryError),
+          });
+        }
+      }
+    }
+    
     logger.error({
       message: 'Error fetching live games',
       error: error instanceof Error ? error.message : String(error),
       status: status || 'unknown',
-      endpoint: POLYMARKET_LIVE_ENDPOINT,
+      endpoint,
       note: 'Returning empty array to prevent service disruption. Existing cached games will continue to be served.',
     });
     
@@ -534,6 +696,31 @@ export async function fetchLiveGames(): Promise<LiveGameEvent[]> {
     // The service will continue to serve any games already stored in the database/memory
     return [];
   }
+}
+
+/**
+ * Process live games API response and extract events
+ */
+function processLiveGamesResponse(response: AxiosResponse<LiveGamesApiResponse>): LiveGameEvent[] {
+  // Extract events from the response
+  const queries = response.data?.pageProps?.dehydratedState?.queries || [];
+  let events: Record<string, LiveGameEvent> = {};
+  
+  for (const query of queries) {
+    const data = query.state?.data;
+    if (data && typeof data === 'object' && 'events' in data) {
+      events = { ...events, ...(data.events || {}) };
+    }
+  }
+
+  const eventArray = Object.values(events);
+  
+  logger.info({
+    message: 'Live games fetched successfully',
+    totalGames: eventArray.length,
+  });
+
+  return eventArray;
 }
 
 /**
@@ -573,6 +760,18 @@ async function storeGamesInDatabase(games: LiveGame[]): Promise<void> {
     await client.query('BEGIN');
     
     for (const game of games) {
+      // Ensure ticker is never null/undefined (required by database)
+      const ticker = game.ticker || game.slug || game.id || 'UNKNOWN';
+      
+      // Log if ticker is missing to help debug
+      if (!game.ticker && !game.slug && !game.id) {
+        logger.warn({
+          message: 'Game missing ticker, slug, and id - using UNKNOWN',
+          gameId: game.id,
+          gameTitle: game.title,
+        });
+      }
+      
       await client.query(
         `INSERT INTO live_games (
           id, ticker, slug, title, description, resolution_source,
@@ -580,7 +779,7 @@ async function storeGamesInDatabase(games: LiveGame[]): Promise<void> {
           restricted, liquidity, volume, volume_24hr, competitive,
           sport, league, series_id, game_id, score, period, elapsed, live, ended,
           transformed_data, raw_data, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
         ON CONFLICT (id) DO UPDATE SET
           ticker = EXCLUDED.ticker,
           slug = EXCLUDED.slug,
@@ -613,7 +812,7 @@ async function storeGamesInDatabase(games: LiveGame[]): Promise<void> {
           updated_at = CURRENT_TIMESTAMP`,
         [
           game.id,
-          game.ticker,
+          ticker, // Use the ensured ticker value
           game.slug,
           game.title,
           game.description,
@@ -648,6 +847,11 @@ async function storeGamesInDatabase(games: LiveGame[]): Promise<void> {
     }
     
     await client.query('COMMIT');
+    
+    // Update cache with stored games
+    for (const game of games) {
+      gamesCache.set(game.id, game);
+    }
     
     logger.info({
       message: 'Games stored in database',
@@ -688,7 +892,18 @@ export async function getAllLiveGames(): Promise<LiveGame[]> {
   const isProduction = process.env.NODE_ENV === 'production';
   
   if (isProduction) {
+    // Check cache first (much faster)
+    if (gamesCache.size > 0) {
+      return Array.from(gamesCache.values());
+    }
+    
+    // Cache empty, fetch from database
     const games = await getAllLiveGamesFromDatabase();
+    
+    // Populate cache
+    for (const game of games) {
+      gamesCache.set(game.id, game);
+    }
     
     // If database is empty, fetch from API
     if (games.length === 0) {
@@ -696,7 +911,13 @@ export async function getAllLiveGames(): Promise<LiveGame[]> {
         message: 'Database is empty, fetching live games from API',
       });
       await refreshLiveGames();
-      return await getAllLiveGamesFromDatabase();
+      const refreshedGames = await getAllLiveGamesFromDatabase();
+      // Update cache
+      gamesCache.clear();
+      for (const game of refreshedGames) {
+        gamesCache.set(game.id, game);
+      }
+      return refreshedGames;
     }
     
     return games;
@@ -873,11 +1094,25 @@ async function updateGameByGameIdInDatabase(gameId: number, updates: Partial<Liv
       values
     );
     
-    // Broadcast update
-    const allGames = await getAllLiveGamesFromDatabase();
-    if (liveGamesService) {
-      liveGamesService.broadcastUpdate(allGames);
-    }
+    // Update cache with the updated game
+    const updatedGame = updated as LiveGame;
+    gamesCache.set(eventId, updatedGame);
+    
+    // Broadcast partial update asynchronously (non-blocking)
+    // Only send the updated game, not all games - much faster!
+    (async () => {
+      try {
+        if (liveGamesService) {
+          liveGamesService.broadcastPartialUpdate(updatedGame);
+        }
+      } catch (error) {
+        logger.error({
+          message: 'Error broadcasting partial game update',
+          error: error instanceof Error ? error.message : String(error),
+          gameId,
+        });
+      }
+    })();
     
     logger.debug({
       message: 'Game updated in database by gameId',
@@ -896,16 +1131,16 @@ function updateGameByGameIdInMemory(gameId: number, updates: Partial<LiveGame>):
   // Find game by gameId
   for (const [eventId, game] of inMemoryGames.entries()) {
     if (game.gameId === gameId) {
-      inMemoryGames.set(eventId, {
+      const updatedGame = {
         ...game,
         ...updates,
         updatedAt: new Date(),
-      });
+      };
+      inMemoryGames.set(eventId, updatedGame);
       
-      // Broadcast update
-      const allGames = Array.from(inMemoryGames.values());
+      // Broadcast partial update (only the updated game)
       if (liveGamesService) {
-        liveGamesService.broadcastUpdate(allGames);
+        liveGamesService.broadcastPartialUpdate(updatedGame);
       }
       return;
     }
@@ -995,10 +1230,28 @@ async function updateGameInDatabase(gameUpdate: Partial<LiveGame> & { id: string
       values
     );
     
-    // Broadcast update
-    const allGames = await getAllLiveGamesFromDatabase();
-    if (liveGamesService) {
-      liveGamesService.broadcastUpdate(allGames);
+    // Update cache if game exists in cache
+    let updatedGame: LiveGame | null = null;
+    if (gamesCache.has(gameUpdate.id)) {
+      const cached = gamesCache.get(gameUpdate.id)!;
+      updatedGame = { ...cached, ...gameUpdate, updatedAt: new Date() };
+      gamesCache.set(gameUpdate.id, updatedGame);
+    }
+    
+    // Broadcast partial update asynchronously (non-blocking)
+    // Only send the updated game if we have it in cache - much faster!
+    if (updatedGame && liveGamesService) {
+      (async () => {
+        try {
+          liveGamesService.broadcastPartialUpdate(updatedGame!);
+        } catch (error) {
+          logger.error({
+            message: 'Error broadcasting partial game update',
+            error: error instanceof Error ? error.message : String(error),
+            gameId: gameUpdate.id,
+          });
+        }
+      })();
     }
     
     logger.debug({
@@ -1016,16 +1269,16 @@ async function updateGameInDatabase(gameUpdate: Partial<LiveGame> & { id: string
 function updateGameInMemory(gameUpdate: Partial<LiveGame> & { id: string }): void {
   const existing = inMemoryGames.get(gameUpdate.id);
   if (existing) {
-    inMemoryGames.set(gameUpdate.id, {
+    const updatedGame = {
       ...existing,
       ...gameUpdate,
       updatedAt: new Date(),
-    });
+    };
+    inMemoryGames.set(gameUpdate.id, updatedGame);
     
-    // Broadcast update
-    const allGames = Array.from(inMemoryGames.values());
+    // Broadcast partial update (only the updated game)
     if (liveGamesService) {
-      liveGamesService.broadcastUpdate(allGames);
+      liveGamesService.broadcastPartialUpdate(updatedGame);
     }
   }
 }
@@ -1107,6 +1360,7 @@ export class LiveGamesService {
   private pollingInterval: NodeJS.Timeout | null = null;
   private isRunning: boolean = false;
   private sseBroadcastCallback: ((games: LiveGame[]) => void) | null = null;
+  private ssePartialBroadcastCallback: ((game: LiveGame) => void) | null = null;
 
   /**
    * Start polling for live games
@@ -1173,6 +1427,13 @@ export class LiveGamesService {
   }
 
   /**
+   * Set SSE partial broadcast callback (for single game updates)
+   */
+  setSSEPartialBroadcastCallback(callback: (game: LiveGame) => void): void {
+    this.ssePartialBroadcastCallback = callback;
+  }
+
+  /**
    * Get status
    */
   getStatus(): { isRunning: boolean; intervalMinutes: number } {
@@ -1188,6 +1449,15 @@ export class LiveGamesService {
   broadcastUpdate(games: LiveGame[]): void {
     if (this.sseBroadcastCallback) {
       this.sseBroadcastCallback(games);
+    }
+  }
+
+  /**
+   * Broadcast single game update via SSE (partial update)
+   */
+  broadcastPartialUpdate(game: LiveGame): void {
+    if (this.ssePartialBroadcastCallback) {
+      this.ssePartialBroadcastCallback(game);
     }
   }
 }
